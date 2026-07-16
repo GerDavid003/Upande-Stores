@@ -31,13 +31,15 @@
    "fetch_from": "employee.custom_farm",
    "fieldname": "farm",
    "fieldtype": "Data",
-   "label": "Farm"
+   "label": "Farm",
+   "read_only": 1
   },
   {
    "fetch_from": "employee.department",
    "fieldname": "department",
    "fieldtype": "Data",
-   "label": "Department"
+   "label": "Department",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
