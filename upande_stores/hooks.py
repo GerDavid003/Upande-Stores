@@ -91,7 +91,7 @@ app_license = "mit"
 # Uninstallation
 # ------------
 
-before_uninstall = "upande_stores.uninstall.before_uninstall"
+# before_uninstall = "upande_stores.uninstall.before_uninstall"
 # after_uninstall = "upande_stores.uninstall.after_uninstall"
 
 # Integration Setup
