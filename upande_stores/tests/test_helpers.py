@@ -64,3 +64,36 @@ def make_material_request(employee_rows=None):
 		mr.append("custom_employee_data", row)
 	mr.insert(ignore_permissions=True)
 	return mr
+
+
+def make_stock_entry_for_material_request(material_request, bio_employee=None):
+	"""Create a not-yet-submitted 'Material Issue' Stock Entry whose single
+	item references material_request's first item row -- the same shape the
+	real "Create" button on a submitted Material Request produces."""
+	farm, business_unit = get_test_farm_and_business_unit()
+	mr_item = material_request.items[0]
+	se = frappe.get_doc(
+		{
+			"doctype": "Stock Entry",
+			"purpose": "Material Issue",
+			"stock_entry_type": "Material Issue",
+			"company": "_Test Company",
+			"custom_farm": farm,
+			"custom_business_unit": business_unit,
+			"bio_employee": bio_employee,
+			"items": [
+				{
+					"item_code": mr_item.item_code,
+					"qty": 1,
+					"uom": "_Test UOM",
+					"stock_uom": "_Test UOM",
+					"conversion_factor": 1,
+					"s_warehouse": "_Test Warehouse - _TC",
+					"material_request": material_request.name,
+					"material_request_item": mr_item.name,
+				}
+			],
+		}
+	)
+	se.insert(ignore_permissions=True)
+	return se

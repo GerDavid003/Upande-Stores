@@ -91,7 +91,7 @@ app_license = "mit"
 # Uninstallation
 # ------------
 
-# before_uninstall = "upande_stores.uninstall.before_uninstall"
+before_uninstall = "upande_stores.uninstall.before_uninstall"
 # after_uninstall = "upande_stores.uninstall.after_uninstall"
 
 # Integration Setup
@@ -141,6 +141,10 @@ app_license = "mit"
 doc_events = {
 	"Material Request": {
 		"validate": "upande_stores.overrides.material_request.validate_no_duplicate_employees",
+	},
+	"Stock Entry": {
+		"on_submit": "upande_stores.overrides.stock_entry.lock_issued_employee",
+		"on_cancel": "upande_stores.overrides.stock_entry.unlock_issued_employee",
 	},
 }
 
