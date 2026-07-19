@@ -21,11 +21,22 @@ def get_test_farm_and_business_unit():
 	return (farm[0] if farm else None, business_unit[0] if business_unit else None)
 
 
+def get_test_employees(count=2):
+	"""Return up to `count` live Active Employee names.
+
+	Like Farm/Business Unit, Employee has no bundled test fixture guaranteeing
+	a specific record exists, so we look up real records rather than
+	hardcoding a name like "HR-EMP-00001" -- callers should skip their test
+	if fewer than the needed count come back.
+	"""
+	return frappe.get_all("Employee", filters={"status": "Active"}, limit=count, pluck="name")
+
+
 def make_material_request(employee_rows=None):
 	"""Create and insert a minimal submitted-ready 'Material Issue' Material
-	Request. employee_rows is a list of dicts (e.g. {"employee": "HR-EMP-00001"}
-	or {"employee": "HR-EMP-00001", "issued_via_stock_entry": "STE-0001"}),
-	appended to custom_employee_data as-is.
+	Request. employee_rows is a list of dicts (e.g. {"employee": <name>}
+	or {"employee": <name>, "issued_via_stock_entry": "STE-0001"}), appended
+	to custom_employee_data as-is.
 	"""
 	farm, business_unit = get_test_farm_and_business_unit()
 	mr = frappe.get_doc(
