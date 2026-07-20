@@ -45,7 +45,7 @@
   {
    "fieldname": "issued_via_stock_entry",
    "fieldtype": "Link",
-   "in_list_view": 1,
+   "in_list_view": 0,
    "label": "Issued Via Stock Entry",
    "options": "Stock Entry",
    "read_only": 1
@@ -55,7 +55,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-07-17 00:00:00.000000",
+ "modified": "2026-07-20 00:00:00.000000",
  "modified_by": "otieno@upande.com",
  "module": "Upande Stores",
  "name": "Employee Request",
