@@ -100,3 +100,22 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 	)
 	se.insert(ignore_permissions=True)
 	return se
+
+
+def make_ppe_item(lifespan_months=6):
+	"""Return the name of a custom_is_ppe Item with the given lifespan, creating
+	it if it doesn't exist yet on this site."""
+	item_code = f"_Test PPE Item {lifespan_months}mo"
+	if not frappe.db.exists("Item", item_code):
+		frappe.get_doc(
+			{
+				"doctype": "Item",
+				"item_code": item_code,
+				"item_group": "_Test Item Group",
+				"stock_uom": "_Test UOM",
+				"is_stock_item": 1,
+				"custom_is_ppe": 1,
+				"custom_ppe_lifespan": lifespan_months,
+			}
+		).insert(ignore_permissions=True)
+	return item_code
