@@ -21,6 +21,11 @@ def _matching_ppe_policies(company, department, designation):
 
 @frappe.whitelist()
 def get_ppe_requirements_for_onboarding(employee):
+	if not frappe.has_permission("PPE Policy", "read"):
+		frappe.throw(
+			_("Not permitted to read PPE Policy data."), frappe.PermissionError
+		)
+
 	emp = frappe.db.get_value(
 		"Employee", employee, ["company", "department", "designation"], as_dict=True
 	)

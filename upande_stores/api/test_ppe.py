@@ -76,3 +76,32 @@ class IntegrationTestGetPPERequirements(IntegrationTestCase):
 
 		result = get_ppe_requirements_for_onboarding(self.employee)
 		self.assertEqual(result, [])
+
+	def test_denies_low_privilege_user(self):
+		"""PPE Policy's own DocPerm restricts read to System Manager, HR
+		Manager, and Farm Manager. A caller with none of those roles must be
+		rejected before the function touches any PPE Policy data -- it must
+		not matter that get_ppe_requirements_for_onboarding uses
+		frappe.db.get_value/frappe.get_all/frappe.get_doc internally, none of
+		which enforce permissions on their own.
+
+		mathias@abc.com is a pre-existing site user with only
+		["Technician", "All", "Guest", "Desk User"] roles (checked directly
+		via frappe.get_roles) -- none of the three permitted roles -- so it's
+		reused here rather than creating a new test user."""
+		low_privilege_user = "mathias@abc.com"
+		if not frappe.db.exists("User", low_privilege_user):
+			self.skipTest(f"Expected pre-existing low-privilege user {low_privilege_user} not found.")
+		roles = set(frappe.get_roles(low_privilege_user))
+		privileged_roles = {"System Manager", "HR Manager", "Farm Manager"}
+		if roles & privileged_roles:
+			self.skipTest(
+				f"{low_privilege_user} unexpectedly has a privileged role ({roles & privileged_roles})."
+			)
+
+		original_user = frappe.session.user
+		self.addCleanup(frappe.set_user, original_user)
+		frappe.set_user(low_privilege_user)
+
+		with self.assertRaises(frappe.PermissionError):
+			get_ppe_requirements_for_onboarding(self.employee)
