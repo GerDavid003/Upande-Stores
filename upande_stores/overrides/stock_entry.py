@@ -39,7 +39,9 @@ def lock_issued_employee(doc, method=None):
 	if not row_name:
 		return
 
-	existing = frappe.db.get_value("Employee Request", row_name, "issued_via_stock_entry")
+	existing = frappe.db.get_value(
+		"Employee Request", row_name, "issued_via_stock_entry", for_update=True
+	)
 	if existing and existing != doc.name:
 		frappe.throw(
 			_(
