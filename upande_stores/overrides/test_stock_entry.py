@@ -46,7 +46,11 @@ class IntegrationTestStockEntryEmployeeLock(IntegrationTestCase):
 		)
 
 	def test_second_submit_for_already_issued_employee_is_blocked(self):
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		# qty=2 on the Material Request against two qty=1 Stock Entries (1+1=2,
+		# not >2) keeps ERPNext's own "can't over-issue against a Material
+		# Request" guard from firing first -- it would otherwise mask whether
+		# lock_issued_employee's own check is what's actually blocking this.
+		mr = make_material_request(employee_rows=[{"employee": self.employee}], qty=2)
 		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		first.submit()
 

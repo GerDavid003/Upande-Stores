@@ -32,11 +32,14 @@ def get_test_employees(count=2):
 	return frappe.get_all("Employee", filters={"status": "Active"}, limit=count, pluck="name")
 
 
-def make_material_request(employee_rows=None):
+def make_material_request(employee_rows=None, qty=1):
 	"""Create and insert a minimal submitted-ready 'Material Issue' Material
 	Request. employee_rows is a list of dicts (e.g. {"employee": <name>}
 	or {"employee": <name>, "issued_via_stock_entry": "STE-0001"}), appended
-	to custom_employee_data as-is.
+	to custom_employee_data as-is. qty defaults to 1; pass a higher value
+	when a test needs to issue against the same Material Request more than
+	once without tripping ERPNext's own "can't over-issue" guard before the
+	code under test gets a chance to run.
 	"""
 	farm, business_unit = get_test_farm_and_business_unit()
 	mr = frappe.get_doc(
@@ -50,7 +53,7 @@ def make_material_request(employee_rows=None):
 			"items": [
 				{
 					"item_code": "_Test Item",
-					"qty": 1,
+					"qty": qty,
 					"uom": "_Test UOM",
 					"stock_uom": "_Test UOM",
 					"conversion_factor": 1,
