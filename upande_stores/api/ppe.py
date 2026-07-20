@@ -113,3 +113,95 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 
 	frappe.db.set_value("Employee Onboarding", onboarding, "custom_ppe_material_request", mr.name)
 	return mr.name
+
+
+def _assignment_eligible_for_replacement(assignment):
+	return assignment.status in ("Inactive", "Expired", "Returned") or assignment.last_inspection_status in (
+		"Worn Out",
+		"Lost",
+	)
+
+
+def _load_assignments(assignments):
+	if isinstance(assignments, str):
+		assignments = json.loads(assignments)
+	if not assignments:
+		frappe.throw(_("No assignments selected."))
+
+	docs = []
+	for name in assignments:
+		doc = frappe.get_doc("Employee PPE Assignment", name)
+		if not frappe.has_permission("Employee PPE Assignment", "write", doc=doc):
+			frappe.throw(
+				_("Not permitted to write to Employee PPE Assignment {0}.").format(doc.name),
+				frappe.PermissionError,
+			)
+		docs.append(doc)
+	return docs
+
+
+def _check_same_scope(assignments):
+	first = assignments[0]
+	for assignment in assignments[1:]:
+		if assignment.company != first.company:
+			frappe.throw(
+				_("All assignments must have the same Company. {0} has a different Company.").format(
+					assignment.name
+				)
+			)
+		if assignment.farm != first.farm:
+			frappe.throw(
+				_("All assignments must have the same Farm. {0} has a different Farm.").format(assignment.name)
+			)
+		if assignment.business_unit != first.business_unit:
+			frappe.throw(
+				_(
+					"All assignments must have the same Business Unit. {0} has a different Business Unit."
+				).format(assignment.name)
+			)
+	return first
+
+
+@frappe.whitelist()
+def create_bulk_ppe_material_request(assignments):
+	docs = _load_assignments(assignments)
+	first = _check_same_scope(docs)
+
+	merged_items = {}
+	employees = set()
+	for assignment in docs:
+		if assignment.replacement_requested:
+			frappe.throw(_("{0} has already been requested for replacement.").format(assignment.name))
+		if not _assignment_eligible_for_replacement(assignment):
+			frappe.throw(_("{0} is not eligible for replacement.").format(assignment.name))
+		employees.add(assignment.employee)
+		merged_items[assignment.item_code] = merged_items.get(assignment.item_code, 0) + (
+			assignment.quantity or 1
+		)
+
+	mr = frappe.get_doc(
+		{
+			"doctype": "Material Request",
+			"material_request_type": "Material Issue",
+			"schedule_date": today(),
+			"company": first.company,
+			"custom_farm": first.farm,
+			"custom_business_unit": first.business_unit,
+			"custom_ppe_issuance": 1,
+			"custom_employee_data": [{"employee": employee} for employee in employees],
+		}
+	)
+	for item_code, qty in merged_items.items():
+		mr.append(
+			"items",
+			{"item_code": item_code, "qty": qty, "schedule_date": today(), "description": "PPE Issuance"},
+		)
+	mr.insert()
+
+	for assignment in docs:
+		frappe.db.set_value(
+			"Employee PPE Assignment",
+			assignment.name,
+			{"replacement_requested": 1, "replacement_material_request": mr.name},
+		)
+	return mr.name

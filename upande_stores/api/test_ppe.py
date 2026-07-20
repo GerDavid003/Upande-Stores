@@ -4,10 +4,15 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from upande_stores.api.ppe import (
+	create_bulk_ppe_material_request,
 	create_ppe_onboarding_material_request,
 	get_ppe_requirements_for_onboarding,
 )
-from upande_stores.tests.test_helpers import get_test_employees, make_ppe_item
+from upande_stores.tests.test_helpers import (
+	get_test_employees,
+	get_test_farm_and_business_unit,
+	make_ppe_item,
+)
 
 
 class IntegrationTestGetPPERequirements(IntegrationTestCase):
@@ -283,3 +288,127 @@ class IntegrationTestCreatePPEOnboardingMR(IntegrationTestCase):
 				employee=self.employee,
 				items=json.dumps([{"item_code": item_code, "quantity": 1}]),
 			)
+
+
+class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
+	"""create_bulk_ppe_material_request() copies farm/business_unit from the
+	batch's Employee PPE Assignment rows onto the Material Request it
+	creates. custom_farm/custom_business_unit are mandatory Custom Fields on
+	Material Request on this site (same finding already documented above on
+	IntegrationTestCreatePPEOnboardingMR -- confirmed directly again via
+	frappe.get_all("Custom Field", filters={"dt": "Material Request",
+	"fieldname": ["in", ["custom_farm", "custom_business_unit"]]}) ->
+	reqd=1 for both). The brief's own fixture for this task
+	(_inactive_assignment) leaves farm/business_unit unset, which would make
+	every test below fail with MandatoryError on mr.insert() regardless of
+	the code under test -- confirmed directly by reproducing that exact
+	insert against this site. So, same pattern as
+	IntegrationTestCreatePPEOnboardingMR's setUp, farm/business_unit are set
+	explicitly here via get_test_farm_and_business_unit() (reusing the
+	existing test_helpers builder that Material Request/Stock Entry tests
+	already rely on for the same reason), and setUp skips if this site has
+	no Farm or Business Unit record at all. There's no cross-check anywhere
+	in EmployeePPEAssignment.validate() tying farm.company to
+	assignment.company, so reusing one arbitrary real Farm/Business Unit
+	alongside "_Test Company" is safe and matches
+	test_helpers.make_material_request's own precedent."""
+
+	def setUp(self):
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+		self.farm, self.business_unit = get_test_farm_and_business_unit()
+		if not self.farm or not self.business_unit:
+			self.skipTest("Need at least one Farm and one Business Unit record on this site.")
+
+	def _inactive_assignment(self):
+		return frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"farm": self.farm,
+				"business_unit": self.business_unit,
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Inactive",
+				"last_inspection_status": "Lost",
+			}
+		).insert(ignore_permissions=True)
+
+	def test_creates_material_issue_and_marks_assignments_requested(self):
+		assignment = self._inactive_assignment()
+		mr_name = create_bulk_ppe_material_request(json.dumps([assignment.name]))
+
+		mr = frappe.get_doc("Material Request", mr_name)
+		self.assertEqual(mr.material_request_type, "Material Issue")
+		self.assertEqual(mr.custom_ppe_issuance, 1)
+		self.assertEqual(mr.items[0].description, "PPE Issuance")
+
+		assignment.reload()
+		self.assertEqual(assignment.replacement_requested, 1)
+		self.assertEqual(assignment.replacement_material_request, mr_name)
+
+	def test_rejects_an_active_assignment_with_no_bad_inspection(self):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"farm": self.farm,
+				"business_unit": self.business_unit,
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+
+		with self.assertRaises(frappe.ValidationError):
+			create_bulk_ppe_material_request(json.dumps([assignment.name]))
+
+	def test_rejects_already_requested_assignment(self):
+		assignment = self._inactive_assignment()
+		create_bulk_ppe_material_request(json.dumps([assignment.name]))
+
+		with self.assertRaises(frappe.ValidationError):
+			create_bulk_ppe_material_request(json.dumps([assignment.name]))
+
+	def test_denies_low_privilege_user(self):
+		"""Employee PPE Assignment's own DocPerm restricts write to System
+		Manager, HR Manager, and Farm Manager (confirmed directly from
+		employee_ppe_assignment.json's permissions list). A caller with none
+		of those roles must be rejected before the function reads/writes any
+		assignment or creates a Material Request -- it must not matter that
+		create_bulk_ppe_material_request (via the shared _load_assignments
+		helper) uses frappe.get_doc/frappe.db.set_value internally, neither
+		of which enforce permissions on their own.
+
+		mathias@abc.com is the same pre-existing low-privilege site user
+		reused from IntegrationTestGetPPERequirements/
+		IntegrationTestCreatePPEOnboardingMR (only
+		["Technician", "All", "Guest", "Desk User"] roles, checked directly
+		via frappe.get_roles) -- none of the three permitted Employee PPE
+		Assignment write roles, so it's reused here too rather than creating
+		a new test user."""
+		low_privilege_user = "mathias@abc.com"
+		if not frappe.db.exists("User", low_privilege_user):
+			self.skipTest(f"Expected pre-existing low-privilege user {low_privilege_user} not found.")
+		roles = set(frappe.get_roles(low_privilege_user))
+		privileged_roles = {"System Manager", "HR Manager", "Farm Manager"}
+		if roles & privileged_roles:
+			self.skipTest(
+				f"{low_privilege_user} unexpectedly has a privileged role ({roles & privileged_roles})."
+			)
+
+		assignment = self._inactive_assignment()
+		original_user = frappe.session.user
+		self.addCleanup(frappe.set_user, original_user)
+		frappe.set_user(low_privilege_user)
+
+		with self.assertRaises(frappe.PermissionError):
+			create_bulk_ppe_material_request(json.dumps([assignment.name]))
