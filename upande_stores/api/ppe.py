@@ -1,5 +1,8 @@
+import json
+
 import frappe
 from frappe import _
+from frappe.utils import today
 
 
 def _matching_ppe_policies(company, department, designation):
@@ -49,3 +52,64 @@ def get_ppe_requirements_for_onboarding(employee):
 					"quantity": row.quantity,
 				}
 	return [row for row in merged.values() if row["quantity"] > 0]
+
+
+@frappe.whitelist()
+def create_ppe_onboarding_material_request(onboarding, employee, items):
+	if not frappe.has_permission("Employee Onboarding", "write", doc=onboarding):
+		frappe.throw(
+			_("Not permitted to write to Employee Onboarding {0}.").format(onboarding),
+			frappe.PermissionError,
+		)
+
+	onboarding_employee = frappe.db.get_value("Employee Onboarding", onboarding, "employee")
+	if not onboarding_employee:
+		frappe.throw(_("Employee Onboarding {0} not found.").format(onboarding))
+	if onboarding_employee != employee:
+		frappe.throw(_("Employee does not match the Employee Onboarding record."))
+
+	existing_mr = frappe.db.get_value(
+		"Employee Onboarding", onboarding, "custom_ppe_material_request"
+	)
+	if existing_mr:
+		frappe.throw(
+			_("A PPE Material Request ({0}) already exists for this onboarding.").format(existing_mr)
+		)
+
+	if isinstance(items, str):
+		items = json.loads(items)
+	if not items:
+		frappe.throw(_("Items list is empty."))
+
+	emp = frappe.db.get_value(
+		"Employee", employee, ["company", "custom_farm", "custom_business_unit"], as_dict=True
+	)
+	if not emp or not emp.company:
+		frappe.throw(_("Employee {0} has no Company set.").format(employee))
+
+	mr = frappe.get_doc(
+		{
+			"doctype": "Material Request",
+			"material_request_type": "Material Issue",
+			"schedule_date": today(),
+			"company": emp.company,
+			"custom_farm": emp.custom_farm or "",
+			"custom_business_unit": emp.custom_business_unit or "",
+			"custom_ppe_issuance": 1,
+			"custom_employee_data": [{"employee": employee}],
+		}
+	)
+	for item in items:
+		mr.append(
+			"items",
+			{
+				"item_code": item["item_code"],
+				"qty": item["quantity"],
+				"schedule_date": today(),
+				"description": "PPE Issuance",
+			},
+		)
+	mr.insert()
+
+	frappe.db.set_value("Employee Onboarding", onboarding, "custom_ppe_material_request", mr.name)
+	return mr.name
