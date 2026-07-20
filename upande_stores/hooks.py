@@ -143,7 +143,10 @@ doc_events = {
 		"validate": "upande_stores.overrides.material_request.validate_no_duplicate_employees",
 	},
 	"Stock Entry": {
-		"on_submit": "upande_stores.overrides.stock_entry.lock_issued_employee",
+		"on_submit": [
+			"upande_stores.overrides.stock_entry.lock_issued_employee",
+			"upande_stores.overrides.stock_entry.create_ppe_assignments",
+		],
 		"on_cancel": "upande_stores.overrides.stock_entry.unlock_issued_employee",
 	},
 }
