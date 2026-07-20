@@ -35,5 +35,47 @@ frappe.ui.form.on("Employee Onboarding", {
 			},
 			__("PPE")
 		);
+
+		if (
+			!frm.is_new() &&
+			frm.doc.custom_ppe_requirements &&
+			frm.doc.custom_ppe_requirements.length > 0 &&
+			!frm.doc.custom_ppe_material_request
+		) {
+			frm.add_custom_button(
+				__("Create PPE Issuance Request"),
+				() => {
+					frappe.confirm(
+						__("Create a PPE Material Issue Request for {0}?", [
+							frm.doc.employee_name || frm.doc.employee,
+						]),
+						() => {
+							frappe.call({
+								method: "upande_stores.api.ppe.create_ppe_onboarding_material_request",
+								args: {
+									onboarding: frm.doc.name,
+									employee: frm.doc.employee,
+									items: JSON.stringify(
+										frm.doc.custom_ppe_requirements
+											.filter((r) => r.item_code && r.quantity > 0)
+											.map((r) => ({ item_code: r.item_code, quantity: r.quantity }))
+									),
+								},
+								callback: (r) => {
+									if (r.message) {
+										frappe.show_alert({
+											message: __("Material Request {0} created", [r.message]),
+											indicator: "green",
+										});
+										frm.reload_doc();
+									}
+								},
+							});
+						}
+					);
+				},
+				__("PPE")
+			);
+		}
 	},
 });
