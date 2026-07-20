@@ -2,7 +2,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import today
+from frappe.utils import add_months, today
 
 
 def _matching_ppe_policies(company, department, designation):
@@ -203,5 +203,57 @@ def create_bulk_ppe_material_request(assignments):
 			"Employee PPE Assignment",
 			assignment.name,
 			{"replacement_requested": 1, "replacement_material_request": mr.name},
+		)
+	return mr.name
+
+
+@frappe.whitelist()
+def create_bulk_ppe_purchase_request(assignments):
+	docs = _load_assignments(assignments)
+	first = _check_same_scope(docs)
+
+	merged_items = {}
+	for assignment in docs:
+		if not assignment.replacement_material_request:
+			frappe.throw(
+				_("{0} does not have a replacement material request. Please create one first.").format(
+					assignment.name
+				)
+			)
+		if assignment.replacement_purchase_request:
+			frappe.throw(
+				_("{0} already has a purchase request: {1}").format(
+					assignment.name, assignment.replacement_purchase_request
+				)
+			)
+		merged_items[assignment.item_code] = merged_items.get(assignment.item_code, 0) + (
+			assignment.quantity or 1
+		)
+
+	mr = frappe.get_doc(
+		{
+			"doctype": "Material Request",
+			"material_request_type": "Purchase",
+			"schedule_date": add_months(today(), 1),
+			"company": first.company,
+			"custom_farm": first.farm,
+			"custom_business_unit": first.business_unit,
+		}
+	)
+	for item_code, qty in merged_items.items():
+		mr.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"schedule_date": add_months(today(), 1),
+				"description": "PPE Purchase",
+			},
+		)
+	mr.insert()
+
+	for assignment in docs:
+		frappe.db.set_value(
+			"Employee PPE Assignment", assignment.name, "replacement_purchase_request", mr.name
 		)
 	return mr.name

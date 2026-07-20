@@ -5,6 +5,7 @@ from frappe.tests import IntegrationTestCase
 
 from upande_stores.api.ppe import (
 	create_bulk_ppe_material_request,
+	create_bulk_ppe_purchase_request,
 	create_ppe_onboarding_material_request,
 	get_ppe_requirements_for_onboarding,
 )
@@ -412,3 +413,89 @@ class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			create_bulk_ppe_material_request(json.dumps([assignment.name]))
+
+
+class IntegrationTestCreateBulkPPEPurchaseRequest(IntegrationTestCase):
+	"""Same finding as IntegrationTestCreateBulkPPEMaterialRequest above:
+	custom_farm/custom_business_unit are mandatory Custom Fields on Material
+	Request on this site (reqd=1 for both, confirmed the same way). The
+	brief's own fixture for this task (_assignment_with_replacement_mr) leaves
+	farm/business_unit unset on the Employee PPE Assignment it builds; those
+	None values get copied straight onto the Material Request that
+	create_bulk_ppe_material_request() creates as part of the setup step
+	(before create_bulk_ppe_purchase_request(), the function under test, even
+	runs), so every test below would fail with MandatoryError on that setup
+	step's mr.insert() regardless of the code under test -- confirmed
+	directly by reproducing that exact insert against this site. Fixed the
+	same way as IntegrationTestCreateBulkPPEMaterialRequest.setUp: farm/
+	business_unit are set explicitly via get_test_farm_and_business_unit(),
+	and setUp skips if this site has no Farm or Business Unit record. Note
+	farm/business_unit are NOT mandatory on Employee PPE Assignment itself
+	(reqd=0, confirmed directly) -- only Material Request enforces them."""
+
+	def setUp(self):
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+		self.farm, self.business_unit = get_test_farm_and_business_unit()
+		if not self.farm or not self.business_unit:
+			self.skipTest("Need at least one Farm and one Business Unit record on this site.")
+
+	def _assignment_with_replacement_mr(self):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"farm": self.farm,
+				"business_unit": self.business_unit,
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Inactive",
+				"last_inspection_status": "Lost",
+			}
+		).insert(ignore_permissions=True)
+		mr_name = create_bulk_ppe_material_request(json.dumps([assignment.name]))
+		assignment.reload()
+		return assignment, mr_name
+
+	def test_creates_purchase_request(self):
+		assignment, _ = self._assignment_with_replacement_mr()
+		mr_name = create_bulk_ppe_purchase_request(json.dumps([assignment.name]))
+
+		mr = frappe.get_doc("Material Request", mr_name)
+		self.assertEqual(mr.material_request_type, "Purchase")
+		self.assertFalse(mr.custom_ppe_issuance)
+		self.assertEqual(mr.items[0].description, "PPE Purchase")
+
+		assignment.reload()
+		self.assertEqual(assignment.replacement_purchase_request, mr_name)
+
+	def test_rejects_assignment_with_no_replacement_material_request(self):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"farm": self.farm,
+				"business_unit": self.business_unit,
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Inactive",
+			}
+		).insert(ignore_permissions=True)
+
+		with self.assertRaises(frappe.ValidationError):
+			create_bulk_ppe_purchase_request(json.dumps([assignment.name]))
+
+	def test_rejects_assignment_already_purchased(self):
+		assignment, _ = self._assignment_with_replacement_mr()
+		create_bulk_ppe_purchase_request(json.dumps([assignment.name]))
+
+		with self.assertRaises(frappe.ValidationError):
+			create_bulk_ppe_purchase_request(json.dumps([assignment.name]))
