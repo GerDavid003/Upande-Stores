@@ -14,6 +14,7 @@
   "other_reason",
   "comments",
   "update_assignment",
+  "previous_status",
   "inspection_result_date"
  ],
  "fields": [
@@ -25,6 +26,7 @@
   {"fieldname": "other_reason", "fieldtype": "Data", "label": "Other Reason"},
   {"fieldname": "comments", "fieldtype": "Small Text", "label": "Comments"},
   {"default": "1", "fieldname": "update_assignment", "fieldtype": "Check", "hidden": 1, "label": "Update Assignment"},
+  {"fieldname": "previous_status", "fieldtype": "Select", "hidden": 1, "label": "Previous Status", "options": "Active\nInactive\nExpired\nReturned", "read_only": 1},
   {"default": "Today", "fieldname": "inspection_result_date", "fieldtype": "Date", "label": "Inspection Result Date", "read_only": 1}
  ],
  "grid_page_length": 50,

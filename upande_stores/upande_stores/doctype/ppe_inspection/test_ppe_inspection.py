@@ -73,6 +73,58 @@ class IntegrationTestPPEInspection(IntegrationTestCase):
 		assignment.reload()
 		self.assertEqual(assignment.status, "Active")
 
+	def test_submit_captures_previous_status_on_the_row(self):
+		# Finding 3: on_submit stamps the assignment's pre-inspection status onto
+		# the inspection's own child row.
+		assignment = self._assignment(status="Active")
+		inspection = self._submit_inspection(assignment, "Lost")
+
+		inspection.reload()
+		self.assertEqual(inspection.items_inspected[0].previous_status, "Active")
+
+	def test_cancel_reverts_status_to_pre_inspection_value(self):
+		# Finding 3: an Active assignment marked Lost goes Inactive on submit;
+		# cancelling the inspection must restore it to Active (the pre-inspection
+		# value), not a hardcoded default.
+		assignment = self._assignment(status="Active")
+		inspection = self._submit_inspection(assignment, "Lost")
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Inactive")
+
+		inspection.cancel()
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Active")
+
+	def test_cancel_reverts_to_inactive_when_it_was_inactive(self):
+		# Finding 3: the revert is to whatever the status actually was before --
+		# an Inactive assignment reactivated by an "OK" inspection must go back
+		# to Inactive on cancel, proving the revert isn't hardcoded to "Active".
+		assignment = self._assignment(status="Inactive")
+		inspection = self._submit_inspection(assignment, "OK")
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Active")
+
+		inspection.cancel()
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Inactive")
+
+	def test_cancel_leaves_last_inspection_fields_stamped(self):
+		# Finding 3 scope boundary: only `status` reverts on cancel -- the
+		# last_inspection* fields stay as whatever the cancelled inspection
+		# stamped.
+		assignment = self._assignment(status="Active")
+		inspection = self._submit_inspection(assignment, "Lost")
+		inspection.cancel()
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Active")
+		self.assertEqual(assignment.last_inspection, inspection.name)
+		self.assertEqual(assignment.last_inspection_status, "Lost")
+
 	def test_skips_rows_with_update_assignment_unchecked(self):
 		assignment = self._assignment()
 		inspection = frappe.get_doc(
