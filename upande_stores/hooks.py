@@ -156,23 +156,11 @@ doc_events = {
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"upande_stores.tasks.all"
-# 	],
-# 	"daily": [
-# 		"upande_stores.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"upande_stores.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"upande_stores.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"upande_stores.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"daily": [
+		"upande_stores.tasks.mark_expired_ppe_assignments",
+	],
+}
 
 # Testing
 # -------
