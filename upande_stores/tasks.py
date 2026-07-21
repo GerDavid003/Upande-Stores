@@ -10,4 +10,6 @@ def mark_expired_ppe_assignments():
 		pluck="name",
 	)
 	for name in expired:
-		frappe.db.set_value("Employee PPE Assignment", name, "status", "Expired")
+		doc = frappe.get_doc("Employee PPE Assignment", name)
+		doc.status = "Expired"
+		doc.save(ignore_permissions=True)
