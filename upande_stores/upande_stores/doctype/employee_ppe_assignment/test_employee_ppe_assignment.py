@@ -4,6 +4,31 @@ from frappe.tests import IntegrationTestCase
 from upande_stores.tests.test_helpers import get_test_employees, make_ppe_item
 
 
+def _make_ppe_inspection_for(employee, assignment):
+	"""Insert (draft) a minimal valid PPE Inspection so its name can be used as
+	a real Link target for Employee PPE Assignment.last_inspection. Returns the
+	inspection's name; skips gracefully via the caller if no Farm exists."""
+	farm = frappe.db.get_value("Farm", {}, "name")
+	inspection = frappe.get_doc(
+		{
+			"doctype": "PPE Inspection",
+			"employee": employee,
+			"supervisor": employee,
+			"farm": farm,
+			"inspection_date": "2026-02-01",
+			"items_inspected": [
+				{
+					"employee_ppe_assignment": assignment.name,
+					"current_status": "OK",
+					"update_assignment": 0,
+				}
+			],
+		}
+	)
+	inspection.insert(ignore_permissions=True)
+	return inspection.name
+
+
 class IntegrationTestEmployeePPEAssignment(IntegrationTestCase):
 	def setUp(self):
 		employees = get_test_employees(count=1)
@@ -78,4 +103,68 @@ class IntegrationTestEmployeePPEAssignment(IntegrationTestCase):
 				"status",
 			),
 			"Inactive",
+		)
+
+	def test_on_trash_deletes_the_history_row(self):
+		# Finding 2: deleting an assignment must remove its Employee PPE History
+		# row, not leave an orphan with a dangling ppe_assignment link.
+		if "upande_hr" not in frappe.get_installed_apps():
+			self.skipTest("upande_hr not installed on this site.")
+
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+		name = assignment.name
+		self.assertTrue(
+			frappe.db.exists("Employee PPE History", {"ppe_assignment": name, "parent": self.employee})
+		)
+
+		frappe.delete_doc("Employee PPE Assignment", name, ignore_permissions=True)
+
+		self.assertFalse(
+			frappe.db.exists("Employee PPE History", {"ppe_assignment": name, "parent": self.employee})
+		)
+
+	def test_syncs_ppe_inspection_link_into_history(self):
+		# Finding 4: on_update must push last_inspection into the history row's
+		# ppe_inspection link (previously declared but never populated).
+		if "upande_hr" not in frappe.get_installed_apps():
+			self.skipTest("upande_hr not installed on this site.")
+		if not frappe.db.get_value("Farm", {}, "name"):
+			self.skipTest("No Farm record available to build a PPE Inspection link target.")
+
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+
+		inspection = _make_ppe_inspection_for(self.employee, assignment)
+
+		assignment.last_inspection = inspection
+		assignment.save(ignore_permissions=True)
+
+		self.assertEqual(
+			frappe.db.get_value(
+				"Employee PPE History",
+				{"ppe_assignment": assignment.name, "parent": self.employee},
+				"ppe_inspection",
+			),
+			inspection,
 		)

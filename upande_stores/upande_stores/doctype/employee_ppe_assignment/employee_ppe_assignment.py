@@ -30,7 +30,22 @@ class EmployeePPEAssignment(Document):
 				"expiry_date": self.expiry_date,
 				"last_inspection_date": self.last_inspection_date,
 				"last_inspection_status": self.last_inspection_status,
+				# Finding 4: keep the history row's PPE Inspection link populated --
+				# it was declared on Employee PPE History but never written to.
+				"ppe_inspection": self.last_inspection,
 			},
+		)
+
+	def on_trash(self):
+		# Finding 2: without this, deleting an assignment (e.g. when its Stock
+		# Entry is cancelled) would leave an orphaned Employee PPE History row
+		# with a dangling ppe_assignment link. Same upande_hr guard the rest of
+		# the sync logic uses.
+		if "upande_hr" not in frappe.get_installed_apps():
+			return
+		frappe.db.delete(
+			"Employee PPE History",
+			{"ppe_assignment": self.name, "parent": self.employee},
 		)
 
 	def _sync_history_row(self):

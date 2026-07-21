@@ -149,7 +149,10 @@ doc_events = {
 			"upande_stores.overrides.stock_entry.lock_issued_employee",
 			"upande_stores.overrides.stock_entry.create_ppe_assignments",
 		],
-		"on_cancel": "upande_stores.overrides.stock_entry.unlock_issued_employee",
+		"on_cancel": [
+			"upande_stores.overrides.stock_entry.unlock_issued_employee",
+			"upande_stores.overrides.stock_entry.delete_ppe_assignments",
+		],
 	},
 }
 

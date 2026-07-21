@@ -102,9 +102,15 @@ def create_ppe_assignments(doc, method=None):
 		if not lifespan or lifespan <= 0:
 			frappe.throw(_("PPE Lifespan (Months) not set for item {0}").format(row.item_code))
 
-		if frappe.db.exists(
+		# for_update=True locks the row(s) matched by this duplicate-active check
+		# for the duration of the transaction, mirroring the hardened read in
+		# lock_issued_employee above -- so two concurrent issuances of the same
+		# item to the same employee can't both pass the check and both insert.
+		if frappe.db.get_value(
 			"Employee PPE Assignment",
 			{"employee": employee, "item_code": row.item_code, "status": "Active"},
+			"name",
+			for_update=True,
 		):
 			frappe.throw(
 				_("{0} is already actively assigned to {1}").format(row.item_code, employee_name)
@@ -142,3 +148,28 @@ def create_ppe_assignments(doc, method=None):
 				frappe.db.set_value(
 					"Employee PPE Assignment", old_name, "replacement_assignment", new_assignment.name
 				)
+
+
+def delete_ppe_assignments(doc, method=None):
+	"""Stock Entry on_cancel: inverse of create_ppe_assignments. Fully delete
+	every Employee PPE Assignment this exact Stock Entry created (keyed by the
+	assignment's stock_entry field), rather than merely deactivating them, so a
+	later re-issue of the same item to the same employee isn't blocked by
+	create_ppe_assignments' duplicate-active guard. Deleting each assignment
+	fires its on_trash, which cleans up the linked Employee PPE History row."""
+	assignment_names = frappe.get_all(
+		"Employee PPE Assignment", filters={"stock_entry": doc.name}, pluck="name"
+	)
+	for name in assignment_names:
+		# create_ppe_assignments points a prior assignment's replacement_assignment
+		# at this (new) one during the replacement flow. That inbound link would
+		# otherwise make delete_doc's link check raise LinkExistsError and abort
+		# the whole Stock Entry cancel. Clearing it here is part of completing the
+		# inverse: create sets these links, so cancel unsets them.
+		referencing = frappe.get_all(
+			"Employee PPE Assignment", filters={"replacement_assignment": name}, pluck="name"
+		)
+		for ref in referencing:
+			frappe.db.set_value("Employee PPE Assignment", ref, "replacement_assignment", None)
+
+		frappe.delete_doc("Employee PPE Assignment", name, ignore_permissions=True)

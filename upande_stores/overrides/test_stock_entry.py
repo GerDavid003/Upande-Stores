@@ -191,6 +191,69 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._issue_ppe_item(item_code)
 
+	def test_cancel_deletes_created_ppe_assignments(self):
+		# Finding 1: Stock Entry on_cancel must fully delete every assignment it
+		# created on submit, so the assignment doesn't linger.
+		item_code = make_ppe_item(lifespan_months=9)
+		se = self._issue_ppe_item(item_code)
+		assignment_name = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_code}, "name"
+		)
+		self.assertTrue(assignment_name)
+
+		se.cancel()
+
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", assignment_name))
+
+	def test_reissue_after_cancel_is_not_blocked(self):
+		# Finding 1: because the cancelled entry's assignment is deleted (not just
+		# deactivated), re-issuing the same item to the same employee must not
+		# trip create_ppe_assignments' duplicate-active guard.
+		item_code = make_ppe_item(lifespan_months=12)
+		first = self._issue_ppe_item(item_code)
+		first.cancel()
+
+		second = self._issue_ppe_item(item_code)  # must not raise
+
+		self.assertTrue(
+			frappe.db.get_value(
+				"Employee PPE Assignment", {"stock_entry": second.name, "item_code": item_code}
+			)
+		)
+
+	def test_cancel_clears_inbound_replacement_links_and_deletes(self):
+		# Finding 1 (replacement flow): create_ppe_assignments points a prior
+		# assignment's replacement_assignment at the newly issued one. Cancelling
+		# the issuing Stock Entry must delete the new assignment AND clear that
+		# inbound link, instead of aborting the cancel with a LinkExistsError.
+		item_code = make_ppe_item(lifespan_months=15)
+		se = self._issue_ppe_item(item_code)
+		new_name = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_code}, "name"
+		)
+		self.assertTrue(new_name)
+
+		prior = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": item_code,
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2025-06-01",
+				"lifespan_months": 15,
+				"status": "Inactive",
+				"replacement_assignment": new_name,
+			}
+		).insert(ignore_permissions=True)
+
+		se.cancel()  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", new_name))
+		self.assertFalse(
+			frappe.db.get_value("Employee PPE Assignment", prior.name, "replacement_assignment")
+		)
+
 	def test_throws_if_item_missing_lifespan(self):
 		item_code = "_Test PPE Item No Lifespan"
 		if not frappe.db.exists("Item", item_code):
