@@ -20,3 +20,19 @@ def validate_no_duplicate_employees(doc, method=None):
 				)
 			)
 		seen.add(row.employee)
+
+
+def unlink_ppe_replacement(doc, method=None):
+	"""Material Request on_cancel/on_trash: if this MR was a PPE Issuance
+	request, clear the replacement lock on any Employee PPE Assignment
+	pointing at it."""
+	if not doc.get("custom_ppe_issuance"):
+		return
+	for name in frappe.get_all(
+		"Employee PPE Assignment", filters={"replacement_material_request": doc.name}, pluck="name"
+	):
+		frappe.db.set_value(
+			"Employee PPE Assignment",
+			name,
+			{"replacement_requested": 0, "replacement_material_request": None},
+		)
