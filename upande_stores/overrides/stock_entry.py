@@ -102,15 +102,21 @@ def create_ppe_assignments(doc, method=None):
 		if not lifespan or lifespan <= 0:
 			frappe.throw(_("PPE Lifespan (Months) not set for item {0}").format(row.item_code))
 
-		# for_update=True locks the row(s) matched by this duplicate-active check
-		# for the duration of the transaction, mirroring the hardened read in
-		# lock_issued_employee above -- so two concurrent issuances of the same
-		# item to the same employee can't both pass the check and both insert.
-		if frappe.db.get_value(
+		# Plain existence check -- NOT for_update=True. That was tried as a
+		# hardened read mirroring lock_issued_employee's, but proven (against two
+		# real concurrent processes) not to actually close the race: `SELECT ...
+		# FOR UPDATE` locks nothing when zero rows match, which is exactly the
+		# first-issuance case this was meant to protect. Keeping the misleading
+		# for_update gave the appearance of a fix without the substance, so it's
+		# reverted here. Known, accepted gap: two people issuing the exact same
+		# item to the exact same employee at the exact same instant could both
+		# pass this check and both insert. This is a manual, button-driven
+		# action, so that window is rare enough in practice that a real fix
+		# (e.g. locking a stable anchor row instead of a query that may match
+		# zero rows) isn't worth the added complexity.
+		if frappe.db.exists(
 			"Employee PPE Assignment",
 			{"employee": employee, "item_code": row.item_code, "status": "Active"},
-			"name",
-			for_update=True,
 		):
 			frappe.throw(
 				_("{0} is already actively assigned to {1}").format(row.item_code, employee_name)
@@ -156,20 +162,50 @@ def delete_ppe_assignments(doc, method=None):
 	assignment's stock_entry field), rather than merely deactivating them, so a
 	later re-issue of the same item to the same employee isn't blocked by
 	create_ppe_assignments' duplicate-active guard. Deleting each assignment
-	fires its on_trash, which cleans up the linked Employee PPE History row."""
+	fires its on_trash, which cleans up the linked Employee PPE History row.
+
+	Each assignment is deleted in its own try/except: a delete that's blocked
+	for one assignment (e.g. some other, unhandled inbound link) must not stop
+	the rest of this Stock Entry's assignments from being cleaned up, and must
+	not abort the on_cancel hook -- the Stock Entry cancel itself must still go
+	through. Failures are logged via frappe.log_error rather than swallowed."""
 	assignment_names = frappe.get_all(
 		"Employee PPE Assignment", filters={"stock_entry": doc.name}, pluck="name"
 	)
 	for name in assignment_names:
-		# create_ppe_assignments points a prior assignment's replacement_assignment
-		# at this (new) one during the replacement flow. That inbound link would
-		# otherwise make delete_doc's link check raise LinkExistsError and abort
-		# the whole Stock Entry cancel. Clearing it here is part of completing the
-		# inverse: create sets these links, so cancel unsets them.
-		referencing = frappe.get_all(
-			"Employee PPE Assignment", filters={"replacement_assignment": name}, pluck="name"
-		)
-		for ref in referencing:
-			frappe.db.set_value("Employee PPE Assignment", ref, "replacement_assignment", None)
+		try:
+			# create_ppe_assignments points a prior assignment's
+			# replacement_assignment at this (new) one during the replacement
+			# flow. That inbound link would otherwise make delete_doc's link
+			# check raise LinkExistsError and abort the whole Stock Entry
+			# cancel. Clearing it here is part of completing the inverse:
+			# create sets these links, so cancel unsets them.
+			referencing = frappe.get_all(
+				"Employee PPE Assignment", filters={"replacement_assignment": name}, pluck="name"
+			)
+			for ref in referencing:
+				frappe.db.set_value("Employee PPE Assignment", ref, "replacement_assignment", None)
 
-		frappe.delete_doc("Employee PPE Assignment", name, ignore_permissions=True)
+			# A PPE Inspection Item child row can also hold a link to this
+			# assignment -- and cancelling the PPE Inspection it belongs to does
+			# NOT clear that link (on_cancel only reverts the assignment's
+			# status, it never touches the child row's own fields). delete_doc's
+			# link check for a plain "Delete" ignores docstatus entirely, so
+			# even a properly cancelled inspection's child row would otherwise
+			# still block this delete. Same idiom as replacement_assignment
+			# above: unset the low-level field rather than cascade into
+			# deleting the PPE Inspection itself -- it stays as a historical
+			# record (remarks, outcome, etc.), just no longer linked to the
+			# assignment being deleted.
+			inspection_items = frappe.get_all(
+				"PPE Inspection Item", filters={"employee_ppe_assignment": name}, pluck="name"
+			)
+			for item_name in inspection_items:
+				frappe.db.set_value("PPE Inspection Item", item_name, "employee_ppe_assignment", None)
+
+			frappe.delete_doc("Employee PPE Assignment", name, ignore_permissions=True)
+		except Exception:
+			frappe.log_error(
+				title=f"delete_ppe_assignments: failed to delete {name} for Stock Entry {doc.name}",
+				message=frappe.get_traceback(),
+			)

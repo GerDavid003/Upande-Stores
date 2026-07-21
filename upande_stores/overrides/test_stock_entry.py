@@ -254,6 +254,145 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 			frappe.db.get_value("Employee PPE Assignment", prior.name, "replacement_assignment")
 		)
 
+	def test_cancel_deletes_assignment_with_linked_ppe_inspection_item(self):
+		# Fix A: a PPE Inspection Item child row referencing this assignment --
+		# even from a PPE Inspection that was itself properly cancelled -- used
+		# to block the whole Stock Entry cancel with LinkExistsError.
+		# Cancelling a PPE Inspection doesn't touch its child rows' own link
+		# fields, and delete_doc's link check for a plain "Delete" ignores
+		# docstatus entirely, so the cancelled inspection's row still counted
+		# as a blocker. Clearing employee_ppe_assignment on those rows first
+		# (mirroring the existing replacement_assignment treatment) lets the
+		# assignment -- and therefore the Stock Entry cancel -- go through,
+		# while the PPE Inspection document itself must survive, untouched as
+		# a historical record.
+		farm, _business_unit = get_test_farm_and_business_unit()
+		item_code = make_ppe_item(lifespan_months=8)
+		se = self._issue_ppe_item(item_code)
+		assignment_name = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_code}, "name"
+		)
+		self.assertTrue(assignment_name)
+
+		inspection = frappe.get_doc(
+			{
+				"doctype": "PPE Inspection",
+				"employee": self.employee,
+				"supervisor": self.employee,
+				"farm": farm,
+				"inspection_date": "2026-02-01",
+				"items_inspected": [
+					{
+						"employee_ppe_assignment": assignment_name,
+						"current_status": "OK",
+						"update_assignment": 0,
+					}
+				],
+			}
+		)
+		inspection.insert(ignore_permissions=True)
+		inspection.submit()
+		inspection.cancel()  # inspection itself properly cancelled...
+
+		item_row_name = frappe.db.get_value(
+			"PPE Inspection Item", {"employee_ppe_assignment": assignment_name}, "name"
+		)
+		self.assertTrue(item_row_name)  # ...but its child row link is still there
+
+		se.cancel()  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", assignment_name))
+		self.assertFalse(
+			frappe.db.get_value("PPE Inspection Item", item_row_name, "employee_ppe_assignment")
+		)
+		self.assertTrue(frappe.db.exists("PPE Inspection", inspection.name))
+
+	def test_isolates_per_assignment_delete_failures_on_cancel(self):
+		# Fix A: if deleting one assignment on a multi-item Stock Entry fails,
+		# the others on the same Stock Entry must still be cleaned up, and the
+		# failure must not propagate out of on_cancel (the Stock Entry cancel
+		# itself must still succeed). Forces a genuine failure for one
+		# assignment via a real, unrelated blocking link that this fix
+		# deliberately does not clear: an Employee PPE History row for a
+		# *different* employee. on_trash's own history cleanup only removes
+		# rows matching {ppe_assignment: name, parent: assignment.employee}, so
+		# a mismatched parent slips past it and still trips delete_doc's
+		# LinkExistsError check.
+		if "upande_hr" not in frappe.get_installed_apps():
+			self.skipTest("upande_hr not installed on this site.")
+		other_employee = next(
+			(e for e in get_test_employees(count=10) if e != self.employee), None
+		)
+		if not other_employee:
+			self.skipTest("Need a second Active Employee record on this site.")
+
+		item_blocked = make_ppe_item(lifespan_months=4)
+		item_clean = make_ppe_item(lifespan_months=5)
+		self._receipt_ppe_item(item_blocked)
+		self._receipt_ppe_item(item_clean)
+
+		farm, business_unit = get_test_farm_and_business_unit()
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"purpose": "Material Issue",
+				"stock_entry_type": "Material Issue",
+				"company": "_Test Company",
+				"custom_farm": farm,
+				"custom_business_unit": business_unit,
+				"bio_employee": self.employee,
+				"items": [
+					{
+						"item_code": item_blocked,
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"s_warehouse": "_Test Warehouse - _TC",
+					},
+					{
+						"item_code": item_clean,
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"s_warehouse": "_Test Warehouse - _TC",
+					},
+				],
+			}
+		)
+		se.insert(ignore_permissions=True)
+		se.submit()
+
+		assignment_blocked = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_blocked}, "name"
+		)
+		assignment_clean = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_clean}, "name"
+		)
+		self.assertTrue(assignment_blocked)
+		self.assertTrue(assignment_clean)
+
+		blocking_row = frappe.get_doc(
+			{
+				"doctype": "Employee PPE History",
+				"parent": other_employee,
+				"parenttype": "Employee",
+				"parentfield": "custom_ppe_history",
+				"ppe_assignment": assignment_blocked,
+				"item_code": item_blocked,
+				"quantity": 1,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+
+		se.cancel()  # must not raise, despite assignment_blocked being undeletable
+
+		self.assertTrue(frappe.db.exists("Employee PPE Assignment", assignment_blocked))
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", assignment_clean))
+
+		frappe.db.delete("Employee PPE History", {"name": blocking_row.name})
+
 	def test_throws_if_item_missing_lifespan(self):
 		item_code = "_Test PPE Item No Lifespan"
 		if not frappe.db.exists("Item", item_code):
