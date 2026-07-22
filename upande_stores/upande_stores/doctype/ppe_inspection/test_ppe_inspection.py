@@ -247,3 +247,46 @@ class IntegrationTestPPEInspection(IntegrationTestCase):
 		inspection.insert(ignore_permissions=True)
 
 		inspection.submit()  # must not raise
+
+	def test_ok_item_does_not_reactivate_an_expired_assignment(self):
+		# Finding 1: an OK verdict must not flip an Expired assignment back to
+		# Active -- the daily auto-expiry job would just silently undo that
+		# within a day anyway. last_inspection* fields still get stamped.
+		assignment = self._assignment(status="Expired")
+		inspection = self._submit_inspection(assignment, "OK")
+
+		assignment.reload()
+		self.assertEqual(assignment.status, "Expired")
+		self.assertEqual(assignment.last_inspection_status, "OK")
+		self.assertEqual(assignment.last_inspection, inspection.name)
+
+	def test_duplicate_assignment_rows_are_blocked_on_validate(self):
+		# Finding 3: the same employee_ppe_assignment appearing twice in
+		# items_inspected must be rejected at save time, before submit is
+		# even possible -- otherwise on_submit would process it twice and
+		# corrupt the previous_status capture used by on_cancel.
+		assignment = self._assignment()
+		inspection = frappe.get_doc(
+			{
+				"doctype": "PPE Inspection",
+				"employee": self.employee,
+				"supervisor": self.employee,
+				"farm": self.farm,
+				"inspection_date": "2026-02-01",
+				"items_inspected": [
+					{
+						"employee_ppe_assignment": assignment.name,
+						"current_status": "OK",
+						"update_assignment": 1,
+					},
+					{
+						"employee_ppe_assignment": assignment.name,
+						"current_status": "OK",
+						"update_assignment": 1,
+					},
+				],
+			}
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			inspection.insert(ignore_permissions=True)

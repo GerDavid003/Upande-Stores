@@ -4,6 +4,27 @@ from frappe.model.document import Document
 
 
 class PPEInspection(Document):
+	def validate(self):
+		# Finding 3: the employee_ppe_assignment link-query filter and the
+		# employee(frm) auto-fetch handler both draw from the same broadened
+		# ("Active"/"Expired") scope, so an inspector can still use the
+		# dropdown to manually add a second row for an assignment already
+		# auto-filled into the table. on_submit would then process that
+		# assignment twice -- the second pass's previous_status capture would
+		# record the already-mutated value, corrupting a later on_cancel
+		# revert. Catch it here, at save time, before submit is even possible.
+		seen = set()
+		for row in self.items_inspected:
+			if not row.employee_ppe_assignment:
+				continue
+			if row.employee_ppe_assignment in seen:
+				frappe.throw(
+					_(
+						"Employee PPE Assignment {0} appears more than once in Items Inspected."
+					).format(row.employee_ppe_assignment)
+				)
+			seen.add(row.employee_ppe_assignment)
+
 	def before_submit(self):
 		has_worn_out = any(row.current_status == "Worn Out" for row in self.items_inspected)
 		if not has_worn_out:
@@ -40,7 +61,12 @@ class PPEInspection(Document):
 
 			if row.current_status in ("Worn Out", "Lost"):
 				assignment.status = "Inactive"
-			elif row.current_status == "OK":
+			elif row.current_status == "OK" and assignment.status != "Expired":
+				# Finding 1: an OK verdict still reactivates a previously Inactive
+				# assignment, but must not flip an Expired assignment back to
+				# Active -- the daily auto-expiry job would just silently undo
+				# that within a day anyway. last_inspection_date/_status/_ are
+				# stamped above regardless; only this status mutation is gated.
 				assignment.status = "Active"
 
 			assignment.save(ignore_permissions=True)
