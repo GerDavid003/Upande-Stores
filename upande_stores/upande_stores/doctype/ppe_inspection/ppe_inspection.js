@@ -8,17 +8,40 @@ frappe.ui.form.on("PPE Inspection", {
 			return {
 				filters: {
 					employee: doc.employee,
-					status: "Active",
+					status: ["in", ["Active", "Expired"]],
 				},
 			};
 		});
 	},
 
 	employee(frm) {
-		if (frm.doc.items_inspected && frm.doc.items_inspected.length) {
-			frm.clear_table("items_inspected");
-			frm.refresh_field("items_inspected");
-			frappe.msgprint(__("Inspection items cleared because Employee was changed."));
+		frm.clear_table("items_inspected");
+		frm.refresh_field("items_inspected");
+
+		if (!frm.doc.employee) {
+			return;
 		}
+
+		frappe.db
+			.get_list("Employee PPE Assignment", {
+				filters: { employee: frm.doc.employee, status: ["in", ["Active", "Expired"]] },
+				fields: ["name", "item_code", "item_name"],
+				limit_page_length: 0,
+			})
+			.then((rows) => {
+				rows.forEach((r) => {
+					const row = frm.add_child("items_inspected");
+					row.employee_ppe_assignment = r.name;
+					row.item_code = r.item_code;
+					row.item_name = r.item_name;
+				});
+				frm.refresh_field("items_inspected");
+				if (rows.length) {
+					frappe.show_alert({
+						message: __("{0} assignment(s) fetched.", [rows.length]),
+						indicator: "green",
+					});
+				}
+			});
 	},
 });
