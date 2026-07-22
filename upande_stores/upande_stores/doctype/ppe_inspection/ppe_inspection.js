@@ -25,7 +25,7 @@ frappe.ui.form.on("PPE Inspection", {
 		frappe.db
 			.get_list("Employee PPE Assignment", {
 				filters: { employee: frm.doc.employee, status: ["in", ["Active", "Expired"]] },
-				fields: ["name", "item_code", "item_name"],
+				fields: ["name", "item_code", "item_name", "issue_date"],
 				limit_page_length: 0,
 			})
 			.then((rows) => {
@@ -34,6 +34,7 @@ frappe.ui.form.on("PPE Inspection", {
 					row.employee_ppe_assignment = r.name;
 					row.item_code = r.item_code;
 					row.item_name = r.item_name;
+					row.issue_date = r.issue_date;
 				});
 				frm.refresh_field("items_inspected");
 				if (rows.length) {
