@@ -2,6 +2,22 @@ import frappe
 from frappe import _
 
 
+def validate_employee_data_required_for_material_issue(doc, method=None):
+	"""Material Request validate hook: a Material Issue request must have at
+	least one row in custom_employee_data.
+
+	custom_employee_data's mandatory_depends_on (see custom/material_request.json)
+	only drives the Desk form's client-side "reqd" behaviour -- Frappe does not
+	re-evaluate mandatory_depends_on server-side when a document is inserted
+	via the API (frappe.model.base_document.BaseDocument._get_missing_mandatory_fields
+	only looks at the field's static reqd flag), so a Material Issue with zero
+	employee rows can still be inserted with doc.insert(ignore_permissions=True)
+	unless this hook blocks it explicitly.
+	"""
+	if doc.material_request_type == "Material Issue" and not doc.get("custom_employee_data"):
+		frappe.throw(_("At least one row is required in Employee Data for a Material Issue request."))
+
+
 def validate_no_duplicate_employees(doc, method=None):
 	"""Material Request validate hook: block saving if the same employee
 	appears more than once in custom_employee_data. Runs on every save (not

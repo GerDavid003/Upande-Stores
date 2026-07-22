@@ -72,6 +72,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
 				"custom_ppe_issuance": 1,
+				"custom_employee_data": [{"employee": self.employee}],
 				"items": [
 					{
 						"item_code": "_Test Item",
@@ -108,6 +109,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"company": "_Test Company",
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
+				"custom_employee_data": [{"employee": self.employee}],
 				"items": [
 					{
 						"item_code": "_Test Item",
@@ -124,3 +126,51 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 		mr.insert(ignore_permissions=True)
 		mr.submit()
 		mr.cancel()  # must not raise
+
+
+class IntegrationTestMaterialRequestEmployeeMandatory(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+
+	def test_material_issue_requires_at_least_one_employee_row(self):
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(employee_rows=[])
+
+	def test_material_issue_employee_row_requires_employee_field(self):
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(employee_rows=[{}])
+
+	def test_material_issue_with_a_populated_employee_row_succeeds(self):
+		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		self.assertEqual(len(mr.custom_employee_data), 1)
+
+	def test_material_transfer_does_not_require_employees(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		mr = frappe.get_doc(
+			{
+				"doctype": "Material Request",
+				"material_request_type": "Material Transfer",
+				"transaction_date": frappe.utils.today(),
+				"company": "_Test Company",
+				"custom_farm": farm,
+				"custom_business_unit": business_unit,
+				"items": [
+					{
+						"item_code": "_Test Item",
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"schedule_date": frappe.utils.today(),
+						"warehouse": "_Test Warehouse - _TC",
+					}
+				],
+			}
+		)
+		mr.insert(ignore_permissions=True)  # must not raise

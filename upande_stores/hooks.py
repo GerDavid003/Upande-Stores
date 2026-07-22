@@ -140,7 +140,10 @@ before_uninstall = "upande_stores.uninstall.before_uninstall"
 
 doc_events = {
 	"Material Request": {
-		"validate": "upande_stores.overrides.material_request.validate_no_duplicate_employees",
+		"validate": [
+			"upande_stores.overrides.material_request.validate_employee_data_required_for_material_issue",
+			"upande_stores.overrides.material_request.validate_no_duplicate_employees",
+		],
 		"on_cancel": "upande_stores.overrides.material_request.unlink_ppe_replacement",
 		"on_trash": "upande_stores.overrides.material_request.unlink_ppe_replacement",
 	},
