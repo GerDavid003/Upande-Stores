@@ -110,6 +110,7 @@ def create_ppe_assignments(doc, method=None):
 		# for_update gave the appearance of a fix without the substance, so it's
 		# reverted here. Known, accepted gap: two people issuing the exact same
 		# item to the exact same employee at the exact same instant could both
+		# this is a random comment
 		# pass this check and both insert. This is a manual, button-driven
 		# action, so that window is rare enough in practice that a real fix
 		# (e.g. locking a stable anchor row instead of a query that may match
