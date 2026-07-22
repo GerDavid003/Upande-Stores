@@ -1,6 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from upande_stores.overrides.stock_entry import inherit_cost_center_from_material_request
 from upande_stores.tests.test_helpers import (
 	get_test_employees,
 	get_test_farm_and_business_unit,
@@ -409,3 +410,84 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			self._issue_ppe_item(item_code)
+
+
+class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test document.")
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+
+	def test_inherits_cost_center_from_material_request_item(self):
+		default_cost_center = frappe.db.get_value("Company", "_Test Company", "cost_center")
+		distinct_cost_center = frappe.get_all(
+			"Cost Center",
+			filters={"company": "_Test Company", "is_group": 0, "name": ["!=", default_cost_center]},
+			limit=1,
+			pluck="name",
+		)
+		if not distinct_cost_center:
+			self.skipTest(
+				"Need a second, non-default Cost Center on _Test Company to prove inheritance (not coincidence)."
+			)
+		distinct_cost_center = distinct_cost_center[0]
+
+		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "cost_center", distinct_cost_center)
+
+		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
+		se.reload()
+
+		self.assertEqual(se.items[0].cost_center, distinct_cost_center)
+		self.assertNotEqual(se.items[0].cost_center, default_cost_center)
+
+	def test_noop_when_material_request_item_has_no_cost_center(self):
+		# Verified against real behaviour: a Material Request Item does NOT
+		# come out of insert() with a blank cost_center -- ERPNext's own
+		# controller defaults it (observed: to "_Test Cost Center - _TC" on
+		# this site), so make_material_request() alone can't produce the
+		# "no cost center" case this test needs. Force it blank directly via
+		# db.set_value (bypassing that controller default) to genuinely
+		# exercise the no-op path, rather than relying on a state that
+		# ERPNext itself never actually leaves the row in.
+		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "cost_center", None)
+		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
+		se.items[0].cost_center = "Should Not Be Overwritten"
+
+		inherit_cost_center_from_material_request(se)
+
+		self.assertEqual(se.items[0].cost_center, "Should Not Be Overwritten")
+
+	def test_noop_when_row_has_no_material_request_item(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"purpose": "Material Issue",
+				"stock_entry_type": "Material Issue",
+				"company": "_Test Company",
+				"custom_farm": farm,
+				"custom_business_unit": business_unit,
+				"bio_employee": self.employee,
+				"items": [
+					{
+						"item_code": "_Test Item",
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"s_warehouse": "_Test Warehouse - _TC",
+					}
+				],
+			}
+		)
+		se.items[0].cost_center = "Should Not Be Overwritten"
+
+		inherit_cost_center_from_material_request(se)  # must not raise
+
+		self.assertEqual(se.items[0].cost_center, "Should Not Be Overwritten")

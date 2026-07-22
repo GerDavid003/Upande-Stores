@@ -156,6 +156,22 @@ def create_ppe_assignments(doc, method=None):
 				)
 
 
+def inherit_cost_center_from_material_request(doc, method=None):
+	"""Stock Entry validate: a row created from a Material Request Item
+	should carry that item's cost center, not whatever Stock Entry itself
+	defaulted to (observed: falls back to the Company's default cost
+	center). Runs on every save, not just insert, so it self-heals if
+	something resets the row's cost_center afterward."""
+	for row in doc.items:
+		if not row.material_request_item:
+			continue
+		mr_cost_center = frappe.db.get_value(
+			"Material Request Item", row.material_request_item, "cost_center"
+		)
+		if mr_cost_center:
+			row.cost_center = mr_cost_center
+
+
 def delete_ppe_assignments(doc, method=None):
 	"""Stock Entry on_cancel: inverse of create_ppe_assignments. Fully delete
 	every Employee PPE Assignment this exact Stock Entry created (keyed by the

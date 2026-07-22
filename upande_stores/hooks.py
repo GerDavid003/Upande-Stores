@@ -148,6 +148,7 @@ doc_events = {
 		"on_trash": "upande_stores.overrides.material_request.unlink_ppe_replacement",
 	},
 	"Stock Entry": {
+		"validate": "upande_stores.overrides.stock_entry.inherit_cost_center_from_material_request",
 		"on_submit": [
 			"upande_stores.overrides.stock_entry.lock_issued_employee",
 			"upande_stores.overrides.stock_entry.create_ppe_assignments",
