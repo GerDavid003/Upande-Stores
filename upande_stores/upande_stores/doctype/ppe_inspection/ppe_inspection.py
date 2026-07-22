@@ -1,8 +1,24 @@
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
 class PPEInspection(Document):
+	def before_submit(self):
+		has_worn_out = any(row.current_status == "Worn Out" for row in self.items_inspected)
+		if not has_worn_out:
+			return
+
+		attached = frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": "PPE Inspection", "attached_to_name": self.name},
+			limit=1,
+		)
+		if not attached:
+			frappe.throw(
+				_("Attach photo evidence before submitting — at least one item is marked Worn Out.")
+			)
+
 	def on_submit(self):
 		for row in self.items_inspected:
 			if not row.update_assignment or not row.employee_ppe_assignment:

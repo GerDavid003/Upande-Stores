@@ -47,6 +47,20 @@ class IntegrationTestPPEInspection(IntegrationTestCase):
 			}
 		)
 		inspection.insert(ignore_permissions=True)
+		if current_status == "Worn Out":
+			# before_submit now blocks a Worn Out submission without an attached
+			# File (see test_blocks_submit_when_worn_out_without_attachment below).
+			# Existing callers of this helper exercising "Worn Out" need a File
+			# attached first so their own (unrelated) assertions can still run.
+			frappe.get_doc(
+				{
+					"doctype": "File",
+					"file_name": "worn_out_evidence.txt",
+					"attached_to_doctype": "PPE Inspection",
+					"attached_to_name": inspection.name,
+					"content": "fake-image-bytes",
+				}
+			).insert(ignore_permissions=True)
 		inspection.submit()
 		return inspection
 
@@ -148,3 +162,88 @@ class IntegrationTestPPEInspection(IntegrationTestCase):
 
 		assignment.reload()
 		self.assertEqual(assignment.status, "Active")
+
+	def test_blocks_submit_when_worn_out_without_attachment(self):
+		assignment = self._assignment()
+		inspection = frappe.get_doc(
+			{
+				"doctype": "PPE Inspection",
+				"employee": self.employee,
+				"supervisor": self.employee,
+				"farm": self.farm,
+				"inspection_date": "2026-02-01",
+				"items_inspected": [
+					{
+						"employee_ppe_assignment": assignment.name,
+						"current_status": "Worn Out",
+						"update_assignment": 1,
+					}
+				],
+			}
+		)
+		inspection.insert(ignore_permissions=True)
+
+		with self.assertRaises(frappe.ValidationError):
+			inspection.submit()
+
+	def test_allows_submit_when_worn_out_with_attachment(self):
+		assignment = self._assignment()
+		inspection = frappe.get_doc(
+			{
+				"doctype": "PPE Inspection",
+				"employee": self.employee,
+				"supervisor": self.employee,
+				"farm": self.farm,
+				"inspection_date": "2026-02-01",
+				"items_inspected": [
+					{
+						"employee_ppe_assignment": assignment.name,
+						"current_status": "Worn Out",
+						"update_assignment": 1,
+					}
+				],
+			}
+		)
+		inspection.insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				# Not `.jpg`: this site has `strip_exif_metadata_from_uploaded_images`
+				# enabled, so a `.jpg`/`.png` filename routes File.save_file() through
+				# PIL's strip_exif_data(), which requires real image bytes and raises
+				# `TypeError: a bytes-like object is required, not 'str'` on this plain
+				# placeholder string. before_submit only checks for a File row's
+				# existence via attached_to_doctype/attached_to_name, not its content
+				# type, so a non-image extension exercises the same code path safely.
+				"file_name": "worn_out_evidence.txt",
+				"attached_to_doctype": "PPE Inspection",
+				"attached_to_name": inspection.name,
+				"content": "fake-image-bytes",
+			}
+		).insert(ignore_permissions=True)
+
+		inspection.submit()  # must not raise
+
+		self.assertEqual(inspection.docstatus, 1)
+
+	def test_ok_item_does_not_require_attachment(self):
+		assignment = self._assignment()
+		inspection = frappe.get_doc(
+			{
+				"doctype": "PPE Inspection",
+				"employee": self.employee,
+				"supervisor": self.employee,
+				"farm": self.farm,
+				"inspection_date": "2026-02-01",
+				"items_inspected": [
+					{
+						"employee_ppe_assignment": assignment.name,
+						"current_status": "OK",
+						"update_assignment": 1,
+					}
+				],
+			}
+		)
+		inspection.insert(ignore_permissions=True)
+
+		inspection.submit()  # must not raise
