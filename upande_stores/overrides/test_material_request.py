@@ -68,7 +68,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"doctype": "Material Request",
 				"material_request_type": "Material Issue",
 				"transaction_date": frappe.utils.today(),
-				"company": "_Test Company",
+				"company": "Karen Roses",
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
 				"custom_ppe_issuance": 1,
@@ -81,7 +81,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 						"stock_uom": "_Test UOM",
 						"conversion_factor": 1,
 						"schedule_date": frappe.utils.today(),
-						"warehouse": "_Test Warehouse - _TC",
+						"warehouse": "Stores - KR",
 					}
 				],
 			}
@@ -106,7 +106,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"doctype": "Material Request",
 				"material_request_type": "Material Issue",
 				"transaction_date": frappe.utils.today(),
-				"company": "_Test Company",
+				"company": "Karen Roses",
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
 				"custom_employee_data": [{"employee": self.employee}],
@@ -118,7 +118,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 						"stock_uom": "_Test UOM",
 						"conversion_factor": 1,
 						"schedule_date": frappe.utils.today(),
-						"warehouse": "_Test Warehouse - _TC",
+						"warehouse": "Stores - KR",
 					}
 				],
 			}

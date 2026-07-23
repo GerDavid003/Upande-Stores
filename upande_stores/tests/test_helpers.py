@@ -47,7 +47,7 @@ def make_material_request(employee_rows=None, qty=1):
 			"doctype": "Material Request",
 			"material_request_type": "Material Issue",
 			"transaction_date": today(),
-			"company": "_Test Company",
+			"company": "Karen Roses",
 			"custom_farm": farm,
 			"custom_business_unit": business_unit,
 			"items": [
@@ -58,7 +58,7 @@ def make_material_request(employee_rows=None, qty=1):
 					"stock_uom": "_Test UOM",
 					"conversion_factor": 1,
 					"schedule_date": today(),
-					"warehouse": "_Test Warehouse - _TC",
+					"warehouse": "Stores - KR",
 				}
 			],
 		}
@@ -80,7 +80,7 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 			"doctype": "Stock Entry",
 			"purpose": "Material Issue",
 			"stock_entry_type": "Material Issue",
-			"company": "_Test Company",
+			"company": "Karen Roses",
 			"custom_farm": farm,
 			"custom_business_unit": business_unit,
 			"bio_employee": bio_employee,
@@ -91,7 +91,7 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 					"uom": "_Test UOM",
 					"stock_uom": "_Test UOM",
 					"conversion_factor": 1,
-					"s_warehouse": "_Test Warehouse - _TC",
+					"s_warehouse": "Stores - KR",
 					"material_request": material_request.name,
 					"material_request_item": mr_item.name,
 				}

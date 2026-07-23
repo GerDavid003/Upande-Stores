@@ -423,16 +423,16 @@ class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
 		self.employee = employees[0]
 
 	def test_inherits_cost_center_from_material_request_item(self):
-		default_cost_center = frappe.db.get_value("Company", "_Test Company", "cost_center")
+		default_cost_center = frappe.db.get_value("Company", "Karen Roses", "cost_center")
 		distinct_cost_center = frappe.get_all(
 			"Cost Center",
-			filters={"company": "_Test Company", "is_group": 0, "name": ["!=", default_cost_center]},
+			filters={"company": "Karen Roses", "is_group": 0, "name": ["!=", default_cost_center]},
 			limit=1,
 			pluck="name",
 		)
 		if not distinct_cost_center:
 			self.skipTest(
-				"Need a second, non-default Cost Center on _Test Company to prove inheritance (not coincidence)."
+				"Need a second, non-default Cost Center on Karen Roses to prove inheritance (not coincidence)."
 			)
 		distinct_cost_center = distinct_cost_center[0]
 
