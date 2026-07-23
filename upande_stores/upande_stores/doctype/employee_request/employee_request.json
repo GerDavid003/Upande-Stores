@@ -8,7 +8,7 @@
  "field_order": [
   "employee",
   "employee_name",
-  "farm",
+  "employee_farm",
   "department",
   "issued_via_stock_entry"
  ],
@@ -31,9 +31,9 @@
   },
   {
    "fetch_from": "employee.custom_farm",
-   "fieldname": "farm",
+   "fieldname": "employee_farm",
    "fieldtype": "Data",
-   "label": "Farm",
+   "label": "Employee's Farm",
    "read_only": 1
   },
   {
