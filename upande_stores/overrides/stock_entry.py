@@ -157,20 +157,28 @@ def create_ppe_assignments(doc, method=None):
 				)
 
 
-def inherit_cost_center_from_material_request(doc, method=None):
+def inherit_accounting_dimensions_from_material_request(doc, method=None):
 	"""Stock Entry validate: a row created from a Material Request Item
-	should carry that item's cost center, not whatever Stock Entry itself
-	defaulted to (observed: falls back to the Company's default cost
-	center). Runs on every save, not just insert, so it self-heals if
-	something resets the row's cost_center afterward."""
+	should carry that item's cost center, farm, and business unit -- not
+	whatever Stock Entry itself defaulted to. Runs on every save, not just
+	insert, so it self-heals if something resets a row's value afterward."""
 	for row in doc.items:
 		if not row.material_request_item:
 			continue
-		mr_cost_center = frappe.db.get_value(
-			"Material Request Item", row.material_request_item, "cost_center"
+		mr_item = frappe.db.get_value(
+			"Material Request Item",
+			row.material_request_item,
+			["cost_center", "farm", "business_unit"],
+			as_dict=True,
 		)
-		if mr_cost_center:
-			row.cost_center = mr_cost_center
+		if not mr_item:
+			continue
+		if mr_item.cost_center:
+			row.cost_center = mr_item.cost_center
+		if mr_item.farm:
+			row.farm = mr_item.farm
+		if mr_item.business_unit:
+			row.business_unit = mr_item.business_unit
 
 
 def delete_ppe_assignments(doc, method=None):

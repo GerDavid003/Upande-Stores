@@ -1,7 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from upande_stores.overrides.stock_entry import inherit_cost_center_from_material_request
+from upande_stores.overrides.stock_entry import inherit_accounting_dimensions_from_material_request
 from upande_stores.tests.test_helpers import (
 	get_test_employees,
 	get_test_farm_and_business_unit,
@@ -412,7 +412,7 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 			self._issue_ppe_item(item_code)
 
 
-class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
+class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCase):
 	def setUp(self):
 		farm, business_unit = get_test_farm_and_business_unit()
 		if not farm or not business_unit:
@@ -445,7 +445,19 @@ class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
 		self.assertEqual(se.items[0].cost_center, distinct_cost_center)
 		self.assertNotEqual(se.items[0].cost_center, default_cost_center)
 
-	def test_noop_when_material_request_item_has_no_cost_center(self):
+	def test_inherits_farm_and_business_unit_from_material_request_item(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "farm", farm)
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "business_unit", business_unit)
+
+		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
+		se.reload()
+
+		self.assertEqual(se.items[0].farm, farm)
+		self.assertEqual(se.items[0].business_unit, business_unit)
+
+	def test_noop_when_material_request_item_has_no_accounting_dimensions(self):
 		# Verified against real behaviour: a Material Request Item does NOT
 		# come out of insert() with a blank cost_center -- ERPNext's own
 		# controller defaults it (observed: to "_Test Cost Center - _TC" on
@@ -456,12 +468,19 @@ class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
 		# ERPNext itself never actually leaves the row in.
 		mr = make_material_request(employee_rows=[{"employee": self.employee}])
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "cost_center", None)
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "farm", None)
+		frappe.db.set_value("Material Request Item", mr.items[0].name, "business_unit", None)
+
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		se.items[0].cost_center = "Should Not Be Overwritten"
+		se.items[0].farm = "Should Not Be Overwritten"
+		se.items[0].business_unit = "Should Not Be Overwritten"
 
-		inherit_cost_center_from_material_request(se)
+		inherit_accounting_dimensions_from_material_request(se)
 
 		self.assertEqual(se.items[0].cost_center, "Should Not Be Overwritten")
+		self.assertEqual(se.items[0].farm, "Should Not Be Overwritten")
+		self.assertEqual(se.items[0].business_unit, "Should Not Be Overwritten")
 
 	def test_noop_when_row_has_no_material_request_item(self):
 		farm, business_unit = get_test_farm_and_business_unit()
@@ -487,7 +506,11 @@ class IntegrationTestStockEntryCostCenterInheritance(IntegrationTestCase):
 			}
 		)
 		se.items[0].cost_center = "Should Not Be Overwritten"
+		se.items[0].farm = "Should Not Be Overwritten"
+		se.items[0].business_unit = "Should Not Be Overwritten"
 
-		inherit_cost_center_from_material_request(se)  # must not raise
+		inherit_accounting_dimensions_from_material_request(se)  # must not raise
 
 		self.assertEqual(se.items[0].cost_center, "Should Not Be Overwritten")
+		self.assertEqual(se.items[0].farm, "Should Not Be Overwritten")
+		self.assertEqual(se.items[0].business_unit, "Should Not Be Overwritten")
