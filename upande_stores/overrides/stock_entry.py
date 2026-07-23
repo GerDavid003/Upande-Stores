@@ -134,8 +134,8 @@ def create_ppe_assignments(doc, method=None):
 				"lifespan_months": lifespan,
 				"stock_entry": doc.name,
 				"company": doc.company,
-				"farm": doc.get("custom_farm"),
-				"business_unit": doc.get("custom_business_unit"),
+				"farm": row.get("farm"),
+				"business_unit": row.get("business_unit"),
 				"status": "Active",
 			}
 		).insert(ignore_permissions=True)

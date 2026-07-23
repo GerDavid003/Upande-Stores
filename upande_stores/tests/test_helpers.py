@@ -32,14 +32,18 @@ def get_test_employees(count=2):
 	return frappe.get_all("Employee", filters={"status": "Active"}, limit=count, pluck="name")
 
 
-def make_material_request(employee_rows=None, qty=1):
+def make_material_request(employee_rows=None, qty=1, item_code="_Test Item"):
 	"""Create and insert a minimal submitted-ready 'Material Issue' Material
 	Request. employee_rows is a list of dicts (e.g. {"employee": <name>}
 	or {"employee": <name>, "issued_via_stock_entry": "STE-0001"}), appended
 	to custom_employee_data as-is. qty defaults to 1; pass a higher value
 	when a test needs to issue against the same Material Request more than
 	once without tripping ERPNext's own "can't over-issue" guard before the
-	code under test gets a chance to run.
+	code under test gets a chance to run. item_code defaults to "_Test Item";
+	pass a specific item (e.g. a PPE item from make_ppe_item) when a caller's
+	Stock Entry needs to reference this Material Request's item row -- ERPNext
+	rejects a Stock Entry row whose item_code doesn't match the Material
+	Request Item it points at via material_request_item.
 	"""
 	farm, business_unit = get_test_farm_and_business_unit()
 	mr = frappe.get_doc(
@@ -52,13 +56,23 @@ def make_material_request(employee_rows=None, qty=1):
 			"custom_business_unit": business_unit,
 			"items": [
 				{
-					"item_code": "_Test Item",
+					"item_code": item_code,
 					"qty": qty,
 					"uom": "_Test UOM",
 					"stock_uom": "_Test UOM",
 					"conversion_factor": 1,
 					"schedule_date": today(),
 					"warehouse": "Stores - KR",
+					# Material Request Item's "Purpose" (description) field is
+					# mandatory site-wide via a real Property Setter. ERPNext's
+					# own item-defaults fetch normally back-fills it from the
+					# Item master's description, but "_Test Item" is the only
+					# item in this codebase's fixtures that happens to have one
+					# set -- any other item_code (e.g. a PPE item from
+					# make_ppe_item, which has none) would otherwise trip that
+					# mandatory check. Setting it explicitly here covers every
+					# item_code, not just the default.
+					"description": item_code,
 				}
 			],
 		}
@@ -73,7 +87,6 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 	"""Create a not-yet-submitted 'Material Issue' Stock Entry whose single
 	item references material_request's first item row -- the same shape the
 	real "Create" button on a submitted Material Request produces."""
-	farm, business_unit = get_test_farm_and_business_unit()
 	mr_item = material_request.items[0]
 	se = frappe.get_doc(
 		{
@@ -81,8 +94,6 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 			"purpose": "Material Issue",
 			"stock_entry_type": "Material Issue",
 			"company": "Karen Roses",
-			"custom_farm": farm,
-			"custom_business_unit": business_unit,
 			"bio_employee": bio_employee,
 			"items": [
 				{

@@ -61,15 +61,12 @@ class IntegrationTestStockEntryEmployeeLock(IntegrationTestCase):
 			second.submit()
 
 	def test_stock_entry_without_material_request_is_a_noop(self):
-		farm, business_unit = get_test_farm_and_business_unit()
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
 				"purpose": "Material Issue",
 				"stock_entry_type": "Material Issue",
 				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
 				"bio_employee": self.employee,
 				"items": [
 					{
@@ -104,15 +101,12 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 		# hook ever runs (this site has "Allow Negative Stock" off, and a
 		# brand-new PPE item starts with zero stock in
 		# "_Test Warehouse - _TC").
-		farm, business_unit = get_test_farm_and_business_unit()
 		receipt = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
 				"purpose": "Material Receipt",
 				"stock_entry_type": "Material Receipt",
 				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
 				"items": [
 					{
 						"item_code": item_code,
@@ -132,15 +126,12 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 		self._receipt_ppe_item(item_code)
 
 		mr = make_material_request(employee_rows=[{"employee": self.employee}])
-		farm, business_unit = get_test_farm_and_business_unit()
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
 				"purpose": "Material Issue",
 				"stock_entry_type": "Material Issue",
 				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
 				"bio_employee": self.employee,
 				"items": [
 					{
@@ -332,15 +323,12 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 		self._receipt_ppe_item(item_blocked)
 		self._receipt_ppe_item(item_clean)
 
-		farm, business_unit = get_test_farm_and_business_unit()
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
 				"purpose": "Material Issue",
 				"stock_entry_type": "Material Issue",
 				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
 				"bio_employee": self.employee,
 				"items": [
 					{
@@ -483,15 +471,12 @@ class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCas
 		self.assertEqual(se.items[0].business_unit, "Should Not Be Overwritten")
 
 	def test_noop_when_row_has_no_material_request_item(self):
-		farm, business_unit = get_test_farm_and_business_unit()
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
 				"purpose": "Material Issue",
 				"stock_entry_type": "Material Issue",
 				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
 				"bio_employee": self.employee,
 				"items": [
 					{
@@ -514,3 +499,95 @@ class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCas
 		self.assertEqual(se.items[0].cost_center, "Should Not Be Overwritten")
 		self.assertEqual(se.items[0].farm, "Should Not Be Overwritten")
 		self.assertEqual(se.items[0].business_unit, "Should Not Be Overwritten")
+
+
+class IntegrationTestStockEntryPPEAssignmentAccountingDimensions(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test document.")
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+
+	def test_ppe_assignment_gets_farm_and_business_unit_via_the_full_inheritance_chain(self):
+		item_code = make_ppe_item(lifespan_months=6)
+
+		# `make_ppe_item` only creates the Item master, not any warehouse
+		# stock -- receipt 1 unit first so the issue below doesn't trip
+		# ERPNext's own NegativeStockError (this site has "Allow Negative
+		# Stock" off, and a brand-new PPE item starts with zero stock in
+		# "Stores - KR").
+		receipt = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"purpose": "Material Receipt",
+				"stock_entry_type": "Material Receipt",
+				"company": "Karen Roses",
+				"items": [
+					{
+						"item_code": item_code,
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"t_warehouse": "Stores - KR",
+					}
+				],
+			}
+		)
+		receipt.insert(ignore_permissions=True)
+		receipt.submit()
+
+		mr = make_material_request(employee_rows=[{"employee": self.employee}], item_code=item_code)
+		expected_farm = mr.custom_farm
+		expected_business_unit = mr.custom_business_unit
+		self.assertTrue(expected_farm)
+		self.assertTrue(expected_business_unit)
+
+		# Task 1's Material Request validate hook should already have synced
+		# these onto the item row on insert.
+		mr.reload()
+		self.assertEqual(mr.items[0].farm, expected_farm)
+		self.assertEqual(mr.items[0].business_unit, expected_business_unit)
+
+		se = frappe.get_doc(
+			{
+				"doctype": "Stock Entry",
+				"purpose": "Material Issue",
+				"stock_entry_type": "Material Issue",
+				"company": "Karen Roses",
+				"bio_employee": self.employee,
+				"items": [
+					{
+						"item_code": item_code,
+						"qty": 1,
+						"uom": "_Test UOM",
+						"stock_uom": "_Test UOM",
+						"conversion_factor": 1,
+						"s_warehouse": "Stores - KR",
+						"material_request": mr.name,
+						"material_request_item": mr.items[0].name,
+					}
+				],
+			}
+		)
+		se.insert(ignore_permissions=True)
+		se.submit()
+
+		# Task 2's Stock Entry validate hook should have pulled farm/business_unit
+		# from the Material Request Item onto this row before submit.
+		se.reload()
+		self.assertEqual(se.items[0].farm, expected_farm)
+		self.assertEqual(se.items[0].business_unit, expected_business_unit)
+
+		# Task 3's fix: create_ppe_assignments must read the row-level values,
+		# not the now-removed Stock Entry header fields.
+		assignment_name = frappe.db.get_value(
+			"Employee PPE Assignment", {"stock_entry": se.name, "item_code": item_code}, "name"
+		)
+		self.assertTrue(assignment_name)
+		assignment = frappe.get_doc("Employee PPE Assignment", assignment_name)
+		self.assertEqual(assignment.farm, expected_farm)
+		self.assertEqual(assignment.business_unit, expected_business_unit)
