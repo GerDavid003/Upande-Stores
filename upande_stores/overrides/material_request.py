@@ -38,6 +38,19 @@ def validate_no_duplicate_employees(doc, method=None):
 		seen.add(row.employee)
 
 
+def sync_accounting_dimensions_to_items(doc, method=None):
+	"""Material Request validate: custom_farm/custom_business_unit are
+	header-level, user-facing pick fields, but the Farm/Business Unit
+	Accounting Dimensions only exist at the Material Request Item level
+	(Material Request itself isn't a reference doctype for them) -- so the
+	header value has to be pushed down onto every item row explicitly."""
+	for row in doc.items:
+		if doc.custom_farm:
+			row.farm = doc.custom_farm
+		if doc.custom_business_unit:
+			row.business_unit = doc.custom_business_unit
+
+
 def unlink_ppe_replacement(doc, method=None):
 	"""Material Request on_cancel/on_trash: if this MR was a PPE Issuance
 	request, clear the replacement lock on any Employee PPE Assignment

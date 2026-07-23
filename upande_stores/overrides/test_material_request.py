@@ -174,3 +174,22 @@ class IntegrationTestMaterialRequestEmployeeMandatory(IntegrationTestCase):
 			}
 		)
 		mr.insert(ignore_permissions=True)  # must not raise
+
+
+class IntegrationTestMaterialRequestAccountingDimensionSync(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
+		employees = get_test_employees(count=1)
+		if not employees:
+			self.skipTest("Need at least 1 Active Employee record on this site.")
+		self.employee = employees[0]
+
+	def test_header_farm_and_business_unit_sync_to_every_item_row(self):
+		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		self.assertTrue(mr.custom_farm)
+		self.assertTrue(mr.custom_business_unit)
+		for row in mr.items:
+			self.assertEqual(row.farm, mr.custom_farm)
+			self.assertEqual(row.business_unit, mr.custom_business_unit)
