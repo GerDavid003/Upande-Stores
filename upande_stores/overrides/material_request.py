@@ -18,24 +18,49 @@ def validate_employee_data_required_for_material_issue(doc, method=None):
 		frappe.throw(_("At least one row is required in Employee Data for a Material Issue request."))
 
 
-def validate_no_duplicate_employees(doc, method=None):
-	"""Material Request validate hook: block saving if the same employee
-	appears more than once in custom_employee_data. Runs on every save (not
-	just once), so a duplicate can't be introduced after the fact -- and it
-	protects the Stock Entry lock/unlock logic (Task 3), which would
-	otherwise have an ambiguous row to match against.
+def validate_employee_allocations(doc, method=None):
+	"""Material Request validate hook: for each row in custom_employee_data,
+	(a) the same (employee, item_code) pair may not repeat, and (b) qty is
+	required and must be positive whenever item_code is set. Runs on every
+	save (not just once), so a violation can't be introduced after the
+	fact -- (a) protects the Stock Entry lock/unlock logic
+	(lock_issued_employee/unlock_issued_employee), which would otherwise
+	have an ambiguous row to match against.
+
+	Blank-item_code rows (the PPE workflow's own shape: one row per
+	employee, no per-item allocation) keep the original
+	single-employee-per-request constraint -- two blank-item_code rows for
+	the same employee still collide, since both match the key
+	(employee, "").
+
+	qty's requirement can't be expressed as a plain JSON `reqd` (it's
+	conditional on item_code) and `mandatory_depends_on` is never enforced
+	server-side (see Global Constraints) -- so it's checked here instead.
 	"""
 	seen = set()
 	for row in doc.get("custom_employee_data") or []:
 		if not row.employee:
 			continue
-		if row.employee in seen:
+		if row.item_code and not (row.qty and row.qty > 0):
+			frappe.throw(
+				_("Row for Employee {0}: Qty is required and must be greater than 0 when Item is set.").format(
+					frappe.bold(row.employee)
+				)
+			)
+		key = (row.employee, row.item_code or "")
+		if key in seen:
+			if row.item_code:
+				frappe.throw(
+					_("Employee {0} appears more than once for Item {1} in Employee Data.").format(
+						frappe.bold(row.employee), frappe.bold(row.item_code)
+					)
+				)
 			frappe.throw(
 				_("Employee {0} appears more than once in Employee Data.").format(
 					frappe.bold(row.employee)
 				)
 			)
-		seen.add(row.employee)
+		seen.add(key)
 
 
 def sync_accounting_dimensions_to_items(doc, method=None):

@@ -38,6 +38,40 @@ class IntegrationTestMaterialRequestEmployeeValidation(IntegrationTestCase):
 		)
 		self.assertEqual(len(mr.custom_employee_data), 2)
 
+	def test_allows_same_employee_with_different_items(self):
+		emp = self.employees[0]
+		mr = make_material_request(
+			employee_rows=[
+				{"employee": emp, "item_code": "_Test Item", "qty": 5},
+				{"employee": emp, "item_code": "_Test Item 2", "qty": 3},
+			]
+		)
+		self.assertEqual(len(mr.custom_employee_data), 2)
+
+	def test_rejects_duplicate_employee_and_item_pair(self):
+		emp = self.employees[0]
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(
+				employee_rows=[
+					{"employee": emp, "item_code": "_Test Item", "qty": 5},
+					{"employee": emp, "item_code": "_Test Item", "qty": 3},
+				]
+			)
+
+	def test_rejects_item_without_qty(self):
+		emp = self.employees[0]
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(
+				employee_rows=[{"employee": emp, "item_code": "_Test Item"}]
+			)
+
+	def test_rejects_item_with_zero_qty(self):
+		emp = self.employees[0]
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(
+				employee_rows=[{"employee": emp, "item_code": "_Test Item", "qty": 0}]
+			)
+
 
 class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 	def setUp(self):
