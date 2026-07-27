@@ -120,8 +120,12 @@ def sync_employee_allocations_to_items(doc, method=None):
 	# ran, on the OLD items, before this hook fired) -- re-run it now so any
 	# site-level mandatory Material Request Item field this function doesn't
 	# know how to compute itself (e.g. expense_account) gets resolved the same
-	# way it would for a manually-entered row. Only fills fields that are
-	# currently blank, so it won't touch what we just set above.
+	# way it would for a manually-entered row. Fills any field that's still
+	# blank (leaving qty/description/uom/conversion_factor/warehouse alone,
+	# since we already set those above) except its own hardcoded
+	# force_item_fields list -- stock_uom is the only one of those we also
+	# set, and it's harmless here since both resolve to the same Item master
+	# value.
 	doc.set_missing_values(for_validate=True)
 
 
