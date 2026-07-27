@@ -704,3 +704,24 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertEqual(locked_row.issued_via_stock_entry, se.name)
 		self.assertEqual(open_row.qty_issued, 0)
 		self.assertFalse(open_row.issued_via_stock_entry)
+
+	def test_issuing_to_an_employee_without_a_matching_allocation_is_blocked(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(
+			employee_rows=[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2, "item_code": "_Test Item 2", "qty": 5},
+			]
+		)
+		se = make_stock_entry_for_material_request(mr, bio_employee=emp2, item_code="_Test Item", qty=3)
+		with self.assertRaises(frappe.ValidationError):
+			se.submit()
+
+	def test_issuing_to_an_employee_with_no_allocation_at_all_is_blocked(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(
+			employee_rows=[{"employee": emp1, "item_code": "_Test Item", "qty": 10}]
+		)
+		se = make_stock_entry_for_material_request(mr, bio_employee=emp2, item_code="_Test Item", qty=3)
+		with self.assertRaises(frappe.ValidationError):
+			se.submit()

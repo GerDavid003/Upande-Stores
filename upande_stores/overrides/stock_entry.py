@@ -71,10 +71,14 @@ def lock_issued_employee(doc, method=None):
 	before this feature -- locks immediately on any submission, throws if a
 	different Stock Entry already claimed it.
 
-	No-ops if there's no Material Request context, no bio_employee set, or a
-	given item row has no matching Employee Request row at all (bio_employee's
-	general biometric-verification use, independent of this feature, is
-	untouched).
+	No-ops if there's no Material Request context or no bio_employee set
+	(bio_employee's general biometric-verification use, independent of this
+	feature, is untouched). Throws if an item row has no matching Employee
+	Request row at all -- i.e. doc.bio_employee was never allocated this
+	item_code under this Material Request -- rather than silently skipping
+	the row: once a Material Request carries per-item allocation, issuing an
+	allocated item to the wrong person (or to someone with no allocation at
+	all) must be blocked outright, not merely left untracked.
 	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
@@ -86,7 +90,11 @@ def lock_issued_employee(doc, method=None):
 
 		employee_request = _find_employee_request_row(material_request, doc.bio_employee, row.item_code)
 		if not employee_request:
-			continue
+			frappe.throw(
+				_(
+					"{0} is not allocated Item {1} under Material Request {2}. Check the Employee Data table for who this item is meant for."
+				).format(frappe.bold(doc.bio_employee), frappe.bold(row.item_code), frappe.bold(material_request))
+			)
 
 		if employee_request.item_code:
 			if employee_request.qty_issued >= employee_request.qty:
@@ -122,6 +130,15 @@ def unlock_issued_employee(doc, method=None):
 
 	Blank-item_code rows: unchanged from before this feature -- clears the
 	lock only if it currently equals this Stock Entry's name.
+
+	Deliberately still no-ops (does NOT throw) when a row has no matching
+	Employee Request row at all -- do not "fix" this to mirror
+	lock_issued_employee's throw. Cancel must remain able to unwind a Stock
+	Entry that was wrongly submitted before lock_issued_employee's throw
+	existed (or before this feature existed at all), where no Employee
+	Request row matches the issued (employee, item_code) pair. If cancel also
+	threw on no-match, such a mis-issued, already-submitted Stock Entry could
+	never be cancelled.
 	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
