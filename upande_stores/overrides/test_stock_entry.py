@@ -591,3 +591,116 @@ class IntegrationTestStockEntryPPEAssignmentAccountingDimensions(IntegrationTest
 		assignment = frappe.get_doc("Employee PPE Assignment", assignment_name)
 		self.assertEqual(assignment.farm, expected_farm)
 		self.assertEqual(assignment.business_unit, expected_business_unit)
+
+
+class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test document.")
+		self.employees = get_test_employees(count=2)
+		if len(self.employees) < 2:
+			self.skipTest("Need at least 2 Active Employee records on this site.")
+		self.employee = self.employees[0]
+
+	def _allocation_row(self, mr):
+		return frappe.db.get_value(
+			"Employee Request",
+			{"parent": mr.name, "employee": self.employee},
+			["name", "qty", "qty_issued", "issued_via_stock_entry"],
+			as_dict=True,
+		)
+
+	def test_partial_issuance_does_not_lock_the_employee(self):
+		mr = make_material_request(
+			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
+		)
+		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
+		se.submit()
+
+		row = self._allocation_row(mr)
+		self.assertEqual(row.qty_issued, 3)
+		self.assertFalse(row.issued_via_stock_entry)
+
+	def test_second_partial_issuance_completes_and_locks(self):
+		mr = make_material_request(
+			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
+		)
+		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
+		first.submit()
+
+		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=7)
+		second.submit()
+
+		row = self._allocation_row(mr)
+		self.assertEqual(row.qty_issued, 10)
+		self.assertEqual(row.issued_via_stock_entry, second.name)
+
+	def test_issuance_after_full_satisfaction_is_blocked(self):
+		mr = make_material_request(
+			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 5}]
+		)
+		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=5)
+		first.submit()
+
+		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=1)
+		with self.assertRaises(frappe.ValidationError):
+			second.submit()
+
+	def test_cancelling_a_partial_issuance_reduces_qty_issued(self):
+		mr = make_material_request(
+			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
+		)
+		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
+		se.submit()
+		se.cancel()
+
+		row = self._allocation_row(mr)
+		self.assertEqual(row.qty_issued, 0)
+		self.assertFalse(row.issued_via_stock_entry)
+
+	def test_cancelling_a_contributing_issuance_reopens_a_locked_employee(self):
+		mr = make_material_request(
+			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
+		)
+		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
+		first.submit()
+		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=7)
+		second.submit()
+
+		row = self._allocation_row(mr)
+		self.assertEqual(row.issued_via_stock_entry, second.name)  # fully locked
+
+		second.cancel()
+
+		row = self._allocation_row(mr)
+		self.assertEqual(row.qty_issued, 3)
+		self.assertFalse(row.issued_via_stock_entry)
+
+	def test_one_employee_with_two_item_allocations_are_tracked_independently(self):
+		emp = self.employee
+		mr = make_material_request(
+			employee_rows=[
+				{"employee": emp, "item_code": "_Test Item", "qty": 5},
+				{"employee": emp, "item_code": "_Test Item 2", "qty": 2},
+			]
+		)
+		se = make_stock_entry_for_material_request(mr, bio_employee=emp, item_code="_Test Item", qty=5)
+		se.submit()
+
+		locked_row = frappe.db.get_value(
+			"Employee Request",
+			{"parent": mr.name, "employee": emp, "item_code": "_Test Item"},
+			["qty_issued", "issued_via_stock_entry"],
+			as_dict=True,
+		)
+		open_row = frappe.db.get_value(
+			"Employee Request",
+			{"parent": mr.name, "employee": emp, "item_code": "_Test Item 2"},
+			["qty_issued", "issued_via_stock_entry"],
+			as_dict=True,
+		)
+		self.assertEqual(locked_row.qty_issued, 5)
+		self.assertEqual(locked_row.issued_via_stock_entry, se.name)
+		self.assertEqual(open_row.qty_issued, 0)
+		self.assertFalse(open_row.issued_via_stock_entry)

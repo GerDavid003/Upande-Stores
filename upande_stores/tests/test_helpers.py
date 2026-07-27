@@ -83,11 +83,21 @@ def make_material_request(employee_rows=None, qty=1, item_code="_Test Item"):
 	return mr
 
 
-def make_stock_entry_for_material_request(material_request, bio_employee=None):
+def make_stock_entry_for_material_request(material_request, bio_employee=None, item_code=None, qty=1):
 	"""Create a not-yet-submitted 'Material Issue' Stock Entry whose single
 	item references material_request's first item row -- the same shape the
-	real "Create" button on a submitted Material Request produces."""
+	real "Create" button on a submitted Material Request produces.
+
+	item_code selects which of material_request's item rows to issue against
+	(defaults to the first row, matching every pre-existing caller); qty
+	defaults to 1. Both are needed for per-employee-allocation tests, which
+	build Material Requests with more than one item row and issue a specific
+	quantity against a specific one -- possibly more than once, to exercise
+	partial issuance.
+	"""
 	mr_item = material_request.items[0]
+	if item_code:
+		mr_item = next(row for row in material_request.items if row.item_code == item_code)
 	se = frappe.get_doc(
 		{
 			"doctype": "Stock Entry",
@@ -98,7 +108,7 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None):
 			"items": [
 				{
 					"item_code": mr_item.item_code,
-					"qty": 1,
+					"qty": qty,
 					"uom": "_Test UOM",
 					"stock_uom": "_Test UOM",
 					"conversion_factor": 1,

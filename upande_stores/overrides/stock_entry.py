@@ -13,64 +13,136 @@ def _resolve_material_request(doc):
 	return None
 
 
+def _find_employee_request_row(material_request, employee, item_code):
+	"""Match the Employee Request row a Stock Entry item row fulfils: first
+	by (material_request, employee, item_code) -- the fine-grained
+	per-item-allocation case -- and if no such row exists, fall back to the
+	blank-item_code row for this employee (the PPE workflow's shape: one row
+	per employee, no item-specificity). Locks the matched row for update so
+	concurrent submits/cancels against the same allocation serialize instead
+	of racing on a stale read.
+	"""
+	fields = ["name", "item_code", "qty", "qty_issued", "issued_via_stock_entry"]
+	row = frappe.db.get_value(
+		"Employee Request",
+		{
+			"parent": material_request,
+			"parenttype": "Material Request",
+			"employee": employee,
+			"item_code": item_code,
+		},
+		fields,
+		as_dict=True,
+		for_update=True,
+	)
+	if row:
+		return row
+	return frappe.db.get_value(
+		"Employee Request",
+		{
+			"parent": material_request,
+			"parenttype": "Material Request",
+			"employee": employee,
+			# An unset Link field lands in the DB as NULL, not "" -- match
+			# both so this fallback finds the PPE workflow's blank-item_code
+			# row regardless of which representation is stored.
+			"item_code": ["in", ["", None]],
+		},
+		fields,
+		as_dict=True,
+		for_update=True,
+	)
+
+
 def lock_issued_employee(doc, method=None):
-	"""Stock Entry on_submit: stamp the matching Employee Request row (by
-	Material Request + employee) with this Stock Entry's name, so it drops
-	out of upande_ta's bio_employee query. Blocks the submit if another
-	Stock Entry already claimed this employee for this Material Request
-	(covers a stale dropdown / race). No-ops if there's no Material Request
-	context, no bio_employee set, or bio_employee isn't one of this
-	Material Request's tracked employees at all (bio_employee's general
-	biometric-verification use, independent of this feature, is untouched).
+	"""Stock Entry on_submit: for each of this Stock Entry's item rows, find
+	the Employee Request row it fulfils and record the issuance against it.
+
+	Fine-grained rows (item_code set): qty_issued accumulates across
+	Stock Entries; the row only locks (drops out of upande_ta's bio_employee
+	query, via issued_via_stock_entry) once qty_issued reaches qty, so a
+	partial issuance leaves the employee selectable for a follow-up entry.
+	Throws if this allocation was already fully satisfied before this Stock
+	Entry. Does not cap how much a single Stock Entry may issue against an
+	allocation -- overshooting the remaining quantity simply locks the row
+	as satisfied; validating that is out of scope.
+
+	Blank-item_code rows (PPE-style, no per-item allocation): unchanged from
+	before this feature -- locks immediately on any submission, throws if a
+	different Stock Entry already claimed it.
+
+	No-ops if there's no Material Request context, no bio_employee set, or a
+	given item row has no matching Employee Request row at all (bio_employee's
+	general biometric-verification use, independent of this feature, is
+	untouched).
 	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
 		return
 
-	row_name = frappe.db.get_value(
-		"Employee Request",
-		{
-			"parent": material_request,
-			"parenttype": "Material Request",
-			"employee": doc.bio_employee,
-		},
-		"name",
-	)
-	if not row_name:
-		return
+	for row in doc.items:
+		if not row.item_code:
+			continue
 
-	existing = frappe.db.get_value(
-		"Employee Request", row_name, "issued_via_stock_entry", for_update=True
-	)
-	if existing and existing != doc.name:
-		frappe.throw(
-			_(
-				"Employee {0} has already been issued items under Material Request {1} via Stock Entry {2}."
-			).format(frappe.bold(doc.bio_employee), frappe.bold(material_request), frappe.bold(existing))
-		)
+		employee_request = _find_employee_request_row(material_request, doc.bio_employee, row.item_code)
+		if not employee_request:
+			continue
 
-	frappe.db.set_value("Employee Request", row_name, "issued_via_stock_entry", doc.name)
+		if employee_request.item_code:
+			if employee_request.qty_issued >= employee_request.qty:
+				frappe.throw(
+					_("Employee {0} has already been fully issued {1} under Material Request {2}.").format(
+						frappe.bold(doc.bio_employee), frappe.bold(row.item_code), frappe.bold(material_request)
+					)
+				)
+			new_qty_issued = employee_request.qty_issued + (row.qty or 0)
+			updates = {"qty_issued": new_qty_issued}
+			if new_qty_issued >= employee_request.qty:
+				updates["issued_via_stock_entry"] = doc.name
+			frappe.db.set_value("Employee Request", employee_request.name, updates)
+		else:
+			existing = employee_request.issued_via_stock_entry
+			if existing and existing != doc.name:
+				frappe.throw(
+					_(
+						"Employee {0} has already been issued items under Material Request {1} via Stock Entry {2}."
+					).format(frappe.bold(doc.bio_employee), frappe.bold(material_request), frappe.bold(existing))
+				)
+			frappe.db.set_value("Employee Request", employee_request.name, "issued_via_stock_entry", doc.name)
 
 
 def unlock_issued_employee(doc, method=None):
-	"""Stock Entry on_cancel: clear the lock, but only the row this exact
-	Stock Entry set -- never a lock belonging to a different entry."""
+	"""Stock Entry on_cancel: inverse of lock_issued_employee, per item row.
+
+	Fine-grained rows (item_code set): qty_issued decrements by this row's
+	quantity (never below 0); issued_via_stock_entry is cleared (reopened)
+	whenever qty_issued drops below qty as a result -- regardless of which
+	Stock Entry is currently recorded there, since cancelling any
+	contributing entry can drop the running total below the threshold.
+
+	Blank-item_code rows: unchanged from before this feature -- clears the
+	lock only if it currently equals this Stock Entry's name.
+	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
 		return
 
-	row_name = frappe.db.get_value(
-		"Employee Request",
-		{
-			"parent": material_request,
-			"parenttype": "Material Request",
-			"employee": doc.bio_employee,
-			"issued_via_stock_entry": doc.name,
-		},
-		"name",
-	)
-	if row_name:
-		frappe.db.set_value("Employee Request", row_name, "issued_via_stock_entry", None)
+	for row in doc.items:
+		if not row.item_code:
+			continue
+
+		employee_request = _find_employee_request_row(material_request, doc.bio_employee, row.item_code)
+		if not employee_request:
+			continue
+
+		if employee_request.item_code:
+			new_qty_issued = max(0, employee_request.qty_issued - (row.qty or 0))
+			updates = {"qty_issued": new_qty_issued}
+			if new_qty_issued < employee_request.qty:
+				updates["issued_via_stock_entry"] = None
+			frappe.db.set_value("Employee Request", employee_request.name, updates)
+		elif employee_request.issued_via_stock_entry == doc.name:
+			frappe.db.set_value("Employee Request", employee_request.name, "issued_via_stock_entry", None)
 
 
 def create_ppe_assignments(doc, method=None):
