@@ -227,3 +227,60 @@ class IntegrationTestMaterialRequestAccountingDimensionSync(IntegrationTestCase)
 		for row in mr.items:
 			self.assertEqual(row.farm, mr.custom_farm)
 			self.assertEqual(row.business_unit, mr.custom_business_unit)
+
+
+class IntegrationTestMaterialRequestAllocationItemSync(IntegrationTestCase):
+	def setUp(self):
+		farm, business_unit = get_test_farm_and_business_unit()
+		if not farm or not business_unit:
+			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
+		self.employees = get_test_employees(count=2)
+		if len(self.employees) < 2:
+			self.skipTest("Need at least 2 Active Employee records on this site.")
+
+	def test_items_table_is_derived_from_employee_allocations(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(
+			employee_rows=[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2, "item_code": "_Test Item 2", "qty": 4},
+			]
+		)
+		by_item = {row.item_code: row.qty for row in mr.items}
+		self.assertEqual(by_item, {"_Test Item": 10, "_Test Item 2": 4})
+
+	def test_allocations_for_the_same_item_are_summed(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(
+			employee_rows=[
+				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
+				{"employee": emp2, "item_code": "_Test Item", "qty": 4},
+			]
+		)
+		self.assertEqual(len(mr.items), 1)
+		self.assertEqual(mr.items[0].item_code, "_Test Item")
+		self.assertEqual(mr.items[0].qty, 14)
+
+	def test_blank_item_code_rows_leave_items_table_untouched(self):
+		# The PPE workflow's own shape: no employee row has item_code set, so
+		# this hook must no-op and leave whatever the caller put in `items`.
+		emp = self.employees[0]
+		mr = make_material_request(employee_rows=[{"employee": emp}], item_code="_Test Item", qty=7)
+		self.assertEqual(len(mr.items), 1)
+		self.assertEqual(mr.items[0].item_code, "_Test Item")
+		self.assertEqual(mr.items[0].qty, 7)
+
+	def test_derived_item_row_carries_forward_an_existing_warehouse(self):
+		# Simulates re-saving a Material Request that already had its Items
+		# table filled in with a warehouse (e.g. from an earlier save, before
+		# qty changed) -- the derived row must not silently drop it.
+		emp = self.employees[0]
+		mr = make_material_request(employee_rows=[{"employee": emp, "item_code": "_Test Item", "qty": 5}])
+		self.assertEqual(mr.items[0].warehouse, "Stores - KR")
+
+		mr.custom_employee_data[0].qty = 8
+		mr.save()
+
+		self.assertEqual(len(mr.items), 1)
+		self.assertEqual(mr.items[0].qty, 8)
+		self.assertEqual(mr.items[0].warehouse, "Stores - KR")
