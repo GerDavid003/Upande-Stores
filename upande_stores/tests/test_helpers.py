@@ -32,53 +32,53 @@ def get_test_employees(count=2):
 	return frappe.get_all("Employee", filters={"status": "Active"}, limit=count, pluck="name")
 
 
-def make_material_request(employee_rows=None, qty=1, item_code="_Test Item"):
-	"""Create and insert a minimal submitted-ready 'Material Issue' Material
-	Request. employee_rows is a list of dicts (e.g. {"employee": <name>}
-	or {"employee": <name>, "issued_via_stock_entry": "STE-0001"}), appended
-	to custom_employee_data as-is. qty defaults to 1; pass a higher value
-	when a test needs to issue against the same Material Request more than
-	once without tripping ERPNext's own "can't over-issue" guard before the
-	code under test gets a chance to run. item_code defaults to "_Test Item";
-	pass a specific item (e.g. a PPE item from make_ppe_item) when a caller's
-	Stock Entry needs to reference this Material Request's item row -- ERPNext
-	rejects a Stock Entry row whose item_code doesn't match the Material
-	Request Item it points at via material_request_item.
+def make_material_request(items=None, material_request_type="Material Issue"):
+	"""Create and insert a minimal submitted-ready Material Request.
+
+	`items` is a list of dicts, each becoming one row in the standard Items
+	table directly -- e.g. {"employee": <name>} (defaults to
+	item_code="_Test Item", qty=1) or {"employee": <name>, "item_code": ...,
+	"qty": ...} for a specific allocation, or {"item_code": ..., "qty": ...}
+	with no employee at all. Defaults to material_request_type="Material
+	Issue" (this app's primary use case, where every row needs an employee);
+	pass "Material Transfer" for tests that need employee to stay optional.
+
+	Each row's item_code/qty/uom/stock_uom/conversion_factor/warehouse
+	default the same way the old single-hardcoded-row version did --
+	callers only need to specify what's different from that default.
+	Material Request Item's "Purpose" (description) field is mandatory
+	site-wide via a real Property Setter; ERPNext's own item-defaults fetch
+	normally back-fills it from the Item master's description, but
+	"_Test Item"/"_Test Item 2" are the only items in this codebase's
+	fixtures that happen to have one set, so it's defaulted here explicitly
+	to cover any other item_code (e.g. a PPE item from make_ppe_item, which
+	has none) too.
 	"""
 	farm, business_unit = get_test_farm_and_business_unit()
 	mr = frappe.get_doc(
 		{
 			"doctype": "Material Request",
-			"material_request_type": "Material Issue",
+			"material_request_type": material_request_type,
 			"transaction_date": today(),
 			"company": "Karen Roses",
 			"custom_farm": farm,
 			"custom_business_unit": business_unit,
-			"items": [
-				{
-					"item_code": item_code,
-					"qty": qty,
-					"uom": "_Test UOM",
-					"stock_uom": "_Test UOM",
-					"conversion_factor": 1,
-					"schedule_date": today(),
-					"warehouse": "Stores - KR",
-					# Material Request Item's "Purpose" (description) field is
-					# mandatory site-wide via a real Property Setter. ERPNext's
-					# own item-defaults fetch normally back-fills it from the
-					# Item master's description, but "_Test Item" is the only
-					# item in this codebase's fixtures that happens to have one
-					# set -- any other item_code (e.g. a PPE item from
-					# make_ppe_item, which has none) would otherwise trip that
-					# mandatory check. Setting it explicitly here covers every
-					# item_code, not just the default.
-					"description": item_code,
-				}
-			],
 		}
 	)
-	for row in employee_rows or []:
-		mr.append("custom_employee_data", row)
+	for row in items or []:
+		item_code = row.get("item_code", "_Test Item")
+		defaults = {
+			"item_code": item_code,
+			"qty": 1,
+			"uom": "_Test UOM",
+			"stock_uom": "_Test UOM",
+			"conversion_factor": 1,
+			"schedule_date": today(),
+			"warehouse": "Stores - KR",
+			"description": item_code,
+		}
+		defaults.update(row)
+		mr.append("items", defaults)
 	mr.insert(ignore_permissions=True)
 	return mr
 
