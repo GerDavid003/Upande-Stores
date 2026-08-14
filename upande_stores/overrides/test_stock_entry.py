@@ -22,43 +22,24 @@ class IntegrationTestStockEntryEmployeeLock(IntegrationTestCase):
 		self.employee = employees[0]
 
 	def test_submit_locks_the_employee_request_row(self):
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		se.submit()
 
-		row_name = frappe.db.get_value(
-			"Employee Request", {"parent": mr.name, "employee": self.employee}, "name"
-		)
 		self.assertEqual(
-			frappe.db.get_value("Employee Request", row_name, "issued_via_stock_entry"),
+			frappe.db.get_value("Material Request Item", mr.items[0].name, "issued_via_stock_entry"),
 			se.name,
 		)
 
 	def test_cancel_unlocks_the_employee_request_row(self):
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		se.submit()
 		se.cancel()
 
-		row_name = frappe.db.get_value(
-			"Employee Request", {"parent": mr.name, "employee": self.employee}, "name"
-		)
 		self.assertFalse(
-			frappe.db.get_value("Employee Request", row_name, "issued_via_stock_entry")
+			frappe.db.get_value("Material Request Item", mr.items[0].name, "issued_via_stock_entry")
 		)
-
-	def test_second_submit_for_already_issued_employee_is_blocked(self):
-		# qty=2 on the Material Request against two qty=1 Stock Entries (1+1=2,
-		# not >2) keeps ERPNext's own "can't over-issue against a Material
-		# Request" guard from firing first -- it would otherwise mask whether
-		# lock_issued_employee's own check is what's actually blocking this.
-		mr = make_material_request(employee_rows=[{"employee": self.employee}], qty=2)
-		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
-		first.submit()
-
-		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
-		with self.assertRaises(frappe.ValidationError):
-			second.submit()
 
 	def test_stock_entry_without_material_request_is_a_noop(self):
 		se = frappe.get_doc(
@@ -125,7 +106,7 @@ class IntegrationTestStockEntryPPEAssignmentCreation(IntegrationTestCase):
 	def _issue_ppe_item(self, item_code):
 		self._receipt_ppe_item(item_code)
 
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		se = frappe.get_doc(
 			{
 				"doctype": "Stock Entry",
@@ -424,7 +405,7 @@ class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCas
 			)
 		distinct_cost_center = distinct_cost_center[0]
 
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "cost_center", distinct_cost_center)
 
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
@@ -435,7 +416,7 @@ class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCas
 
 	def test_inherits_farm_and_business_unit_from_material_request_item(self):
 		farm, business_unit = get_test_farm_and_business_unit()
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "farm", farm)
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "business_unit", business_unit)
 
@@ -454,7 +435,7 @@ class IntegrationTestStockEntryAccountingDimensionInheritance(IntegrationTestCas
 		# db.set_value (bypassing that controller default) to genuinely
 		# exercise the no-op path, rather than relying on a state that
 		# ERPNext itself never actually leaves the row in.
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "cost_center", None)
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "farm", None)
 		frappe.db.set_value("Material Request Item", mr.items[0].name, "business_unit", None)
@@ -540,7 +521,7 @@ class IntegrationTestStockEntryPPEAssignmentAccountingDimensions(IntegrationTest
 		receipt.insert(ignore_permissions=True)
 		receipt.submit()
 
-		mr = make_material_request(employee_rows=[{"employee": self.employee}], item_code=item_code)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": item_code}])
 		expected_farm = mr.custom_farm
 		expected_business_unit = mr.custom_business_unit
 		self.assertTrue(expected_farm)
@@ -593,6 +574,8 @@ class IntegrationTestStockEntryPPEAssignmentAccountingDimensions(IntegrationTest
 		self.assertEqual(assignment.business_unit, expected_business_unit)
 
 
+
+
 class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 	def setUp(self):
 		farm, business_unit = get_test_farm_and_business_unit()
@@ -603,18 +586,16 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 			self.skipTest("Need at least 2 Active Employee records on this site.")
 		self.employee = self.employees[0]
 
-	def _allocation_row(self, mr):
+	def _allocation_row(self, mr, item_code="_Test Item"):
 		return frappe.db.get_value(
-			"Employee Request",
-			{"parent": mr.name, "employee": self.employee},
+			"Material Request Item",
+			{"parent": mr.name, "employee": self.employee, "item_code": item_code},
 			["name", "qty", "qty_issued", "issued_via_stock_entry"],
 			as_dict=True,
 		)
 
 	def test_partial_issuance_does_not_lock_the_employee(self):
-		mr = make_material_request(
-			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
-		)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
 		se.submit()
 
@@ -623,9 +604,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertFalse(row.issued_via_stock_entry)
 
 	def test_second_partial_issuance_completes_and_locks(self):
-		mr = make_material_request(
-			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
-		)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}])
 		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
 		first.submit()
 
@@ -637,9 +616,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertEqual(row.issued_via_stock_entry, second.name)
 
 	def test_issuance_after_full_satisfaction_is_blocked(self):
-		mr = make_material_request(
-			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 5}]
-		)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 5}])
 		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=5)
 		first.submit()
 
@@ -648,9 +625,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 			second.submit()
 
 	def test_cancelling_a_partial_issuance_reduces_qty_issued(self):
-		mr = make_material_request(
-			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
-		)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
 		se.submit()
 		se.cancel()
@@ -660,9 +635,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertFalse(row.issued_via_stock_entry)
 
 	def test_cancelling_a_contributing_issuance_reopens_a_locked_employee(self):
-		mr = make_material_request(
-			employee_rows=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}]
-		)
+		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 10}])
 		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=3)
 		first.submit()
 		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=7)
@@ -680,7 +653,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 	def test_one_employee_with_two_item_allocations_are_tracked_independently(self):
 		emp = self.employee
 		mr = make_material_request(
-			employee_rows=[
+			items=[
 				{"employee": emp, "item_code": "_Test Item", "qty": 5},
 				{"employee": emp, "item_code": "_Test Item 2", "qty": 2},
 			]
@@ -688,18 +661,8 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		se = make_stock_entry_for_material_request(mr, bio_employee=emp, item_code="_Test Item", qty=5)
 		se.submit()
 
-		locked_row = frappe.db.get_value(
-			"Employee Request",
-			{"parent": mr.name, "employee": emp, "item_code": "_Test Item"},
-			["qty_issued", "issued_via_stock_entry"],
-			as_dict=True,
-		)
-		open_row = frappe.db.get_value(
-			"Employee Request",
-			{"parent": mr.name, "employee": emp, "item_code": "_Test Item 2"},
-			["qty_issued", "issued_via_stock_entry"],
-			as_dict=True,
-		)
+		locked_row = self._allocation_row(mr, item_code="_Test Item")
+		open_row = self._allocation_row(mr, item_code="_Test Item 2")
 		self.assertEqual(locked_row.qty_issued, 5)
 		self.assertEqual(locked_row.issued_via_stock_entry, se.name)
 		self.assertEqual(open_row.qty_issued, 0)
@@ -708,7 +671,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 	def test_issuing_to_an_employee_without_a_matching_allocation_is_blocked(self):
 		emp1, emp2 = self.employees
 		mr = make_material_request(
-			employee_rows=[
+			items=[
 				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
 				{"employee": emp2, "item_code": "_Test Item 2", "qty": 5},
 			]
@@ -719,9 +682,7 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 
 	def test_issuing_to_an_employee_with_no_allocation_at_all_is_blocked(self):
 		emp1, emp2 = self.employees
-		mr = make_material_request(
-			employee_rows=[{"employee": emp1, "item_code": "_Test Item", "qty": 10}]
-		)
+		mr = make_material_request(items=[{"employee": emp1, "item_code": "_Test Item", "qty": 10}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=emp2, item_code="_Test Item", qty=3)
 		with self.assertRaises(frappe.ValidationError):
 			se.submit()

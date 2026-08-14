@@ -13,23 +13,24 @@ def _resolve_material_request(doc):
 	return None
 
 
-def _find_employee_request_row(material_request, employee, item_code):
-	"""Match the Employee Request row a Stock Entry item row fulfils: first
-	by (material_request, employee, item_code) -- the fine-grained
-	per-item-allocation case -- and if no such row exists, fall back to the
-	blank-item_code row for this employee (the PPE workflow's shape: one row
-	per employee, no item-specificity). Locks the matched row for update so
-	concurrent submits/cancels against the same allocation serialize instead
-	of racing on a stale read.
+def _find_allocation_row(material_request, employee, item_code):
+	"""Match the Material Request Item row a Stock Entry item row fulfils:
+	first by (material_request, item_code, employee) -- the row allocated
+	to exactly this employee -- and if no such row exists, fall back to a
+	row with the same item_code and a blank employee (no per-employee
+	attribution at all; only reachable for non-Material-Issue request
+	types, since Material Issue requires employee on every row). Locks the
+	matched row for update so concurrent submits/cancels against the same
+	allocation serialize instead of racing on a stale read.
 	"""
-	fields = ["name", "item_code", "qty", "qty_issued", "issued_via_stock_entry"]
+	fields = ["name", "employee", "qty", "qty_issued", "issued_via_stock_entry"]
 	row = frappe.db.get_value(
-		"Employee Request",
+		"Material Request Item",
 		{
 			"parent": material_request,
 			"parenttype": "Material Request",
-			"employee": employee,
 			"item_code": item_code,
+			"employee": employee,
 		},
 		fields,
 		as_dict=True,
@@ -38,15 +39,15 @@ def _find_employee_request_row(material_request, employee, item_code):
 	if row:
 		return row
 	return frappe.db.get_value(
-		"Employee Request",
+		"Material Request Item",
 		{
 			"parent": material_request,
 			"parenttype": "Material Request",
-			"employee": employee,
+			"item_code": item_code,
 			# An unset Link field lands in the DB as NULL, not "" -- match
-			# both so this fallback finds the PPE workflow's blank-item_code
-			# row regardless of which representation is stored.
-			"item_code": ["in", ["", None]],
+			# both so this fallback finds a genuinely-blank-employee row
+			# regardless of which representation is stored.
+			"employee": ["in", ["", None]],
 		},
 		fields,
 		as_dict=True,
@@ -56,29 +57,28 @@ def _find_employee_request_row(material_request, employee, item_code):
 
 def lock_issued_employee(doc, method=None):
 	"""Stock Entry on_submit: for each of this Stock Entry's item rows, find
-	the Employee Request row it fulfils and record the issuance against it.
+	the Material Request Item row it fulfils and record the issuance
+	against it directly on that row.
 
-	Fine-grained rows (item_code set): qty_issued accumulates across
-	Stock Entries; the row only locks (drops out of upande_ta's bio_employee
-	query, via issued_via_stock_entry) once qty_issued reaches qty, so a
-	partial issuance leaves the employee selectable for a follow-up entry.
-	Throws if this allocation was already fully satisfied before this Stock
-	Entry. Does not cap how much a single Stock Entry may issue against an
-	allocation -- overshooting the remaining quantity simply locks the row
-	as satisfied; validating that is out of scope.
+	Row has employee matching doc.bio_employee: qty_issued accumulates
+	across Stock Entries; the row only locks (drops out of upande_ta's
+	bio_employee query, via issued_via_stock_entry) once qty_issued reaches
+	qty, so a partial issuance leaves the employee selectable for a
+	follow-up entry. Throws if this allocation was already fully satisfied
+	before this Stock Entry. Does not cap how much a single Stock Entry may
+	issue against an allocation -- overshooting the remaining quantity
+	simply locks the row as satisfied; validating that is out of scope.
 
-	Blank-item_code rows (PPE-style, no per-item allocation): unchanged from
-	before this feature -- locks immediately on any submission, throws if a
-	different Stock Entry already claimed it.
+	Row has no employee at all (blank -- only possible for non-Material-
+	Issue request types): not tracked, no-op.
 
-	No-ops if there's no Material Request context or no bio_employee set
-	(bio_employee's general biometric-verification use, independent of this
-	feature, is untouched). Throws if an item row has no matching Employee
-	Request row at all -- i.e. doc.bio_employee was never allocated this
-	item_code under this Material Request -- rather than silently skipping
-	the row: once a Material Request carries per-item allocation, issuing an
-	allocated item to the wrong person (or to someone with no allocation at
-	all) must be blocked outright, not merely left untracked.
+	No-ops if there's no Material Request context or no bio_employee set.
+	Throws if every Material Request Item row with this item_code has some
+	other, specific employee set -- i.e. doc.bio_employee was never
+	allocated this item_code under this Material Request -- rather than
+	silently skipping the row: issuing an allocated item to the wrong
+	person (or to someone with no allocation at all) must be blocked
+	outright, not merely left untracked.
 	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
@@ -88,57 +88,56 @@ def lock_issued_employee(doc, method=None):
 		if not row.item_code:
 			continue
 
-		employee_request = _find_employee_request_row(material_request, doc.bio_employee, row.item_code)
-		if not employee_request:
+		allocation = _find_allocation_row(material_request, doc.bio_employee, row.item_code)
+		if not allocation:
 			frappe.throw(
-				_(
-					"{0} is not allocated Item {1} under Material Request {2}. Check the Employee Data table for who this item is meant for."
-				).format(frappe.bold(doc.bio_employee), frappe.bold(row.item_code), frappe.bold(material_request))
+				_("{0} is not allocated Item {1} under Material Request {2}.").format(
+					frappe.bold(doc.bio_employee), frappe.bold(row.item_code), frappe.bold(material_request)
+				)
 			)
 
-		if employee_request.item_code:
-			if employee_request.qty_issued >= employee_request.qty:
+		if allocation.employee:
+			if allocation.qty_issued >= allocation.qty:
 				frappe.throw(
 					_("Employee {0} has already been fully issued {1} under Material Request {2}.").format(
 						frappe.bold(doc.bio_employee), frappe.bold(row.item_code), frappe.bold(material_request)
 					)
 				)
-			new_qty_issued = employee_request.qty_issued + (row.qty or 0)
+			new_qty_issued = allocation.qty_issued + (row.qty or 0)
 			updates = {"qty_issued": new_qty_issued}
-			if new_qty_issued >= employee_request.qty:
+			if new_qty_issued >= allocation.qty:
 				updates["issued_via_stock_entry"] = doc.name
-			frappe.db.set_value("Employee Request", employee_request.name, updates)
+			frappe.db.set_value("Material Request Item", allocation.name, updates)
 		else:
-			existing = employee_request.issued_via_stock_entry
+			existing = allocation.issued_via_stock_entry
 			if existing and existing != doc.name:
 				frappe.throw(
 					_(
 						"Employee {0} has already been issued items under Material Request {1} via Stock Entry {2}."
 					).format(frappe.bold(doc.bio_employee), frappe.bold(material_request), frappe.bold(existing))
 				)
-			frappe.db.set_value("Employee Request", employee_request.name, "issued_via_stock_entry", doc.name)
+			frappe.db.set_value("Material Request Item", allocation.name, "issued_via_stock_entry", doc.name)
 
 
 def unlock_issued_employee(doc, method=None):
 	"""Stock Entry on_cancel: inverse of lock_issued_employee, per item row.
 
-	Fine-grained rows (item_code set): qty_issued decrements by this row's
-	quantity (never below 0); issued_via_stock_entry is cleared (reopened)
-	whenever qty_issued drops below qty as a result -- regardless of which
-	Stock Entry is currently recorded there, since cancelling any
-	contributing entry can drop the running total below the threshold.
+	Row has employee set: qty_issued decrements by this row's quantity
+	(never below 0); issued_via_stock_entry is cleared (reopened) whenever
+	qty_issued drops below qty as a result -- regardless of which Stock
+	Entry is currently recorded there, since cancelling any contributing
+	entry can drop the running total below the threshold.
 
-	Blank-item_code rows: unchanged from before this feature -- clears the
-	lock only if it currently equals this Stock Entry's name.
+	Row has no employee: clears the lock only if it currently equals this
+	Stock Entry's name.
 
-	Deliberately still no-ops (does NOT throw) when a row has no matching
-	Employee Request row at all -- do not "fix" this to mirror
+	Deliberately still no-ops (does NOT throw) when no Material Request
+	Item row matches at all -- do not "fix" this to mirror
 	lock_issued_employee's throw. Cancel must remain able to unwind a Stock
 	Entry that was wrongly submitted before lock_issued_employee's throw
-	existed (or before this feature existed at all), where no Employee
-	Request row matches the issued (employee, item_code) pair. If cancel also
-	threw on no-match, such a mis-issued, already-submitted Stock Entry could
-	never be cancelled.
+	existed, where no row matches the issued (employee, item_code) pair. If
+	cancel also threw on no-match, such a mis-issued, already-submitted
+	Stock Entry could never be cancelled.
 	"""
 	material_request = _resolve_material_request(doc)
 	if not material_request or not doc.get("bio_employee"):
@@ -148,18 +147,18 @@ def unlock_issued_employee(doc, method=None):
 		if not row.item_code:
 			continue
 
-		employee_request = _find_employee_request_row(material_request, doc.bio_employee, row.item_code)
-		if not employee_request:
+		allocation = _find_allocation_row(material_request, doc.bio_employee, row.item_code)
+		if not allocation:
 			continue
 
-		if employee_request.item_code:
-			new_qty_issued = max(0, employee_request.qty_issued - (row.qty or 0))
+		if allocation.employee:
+			new_qty_issued = max(0, allocation.qty_issued - (row.qty or 0))
 			updates = {"qty_issued": new_qty_issued}
-			if new_qty_issued < employee_request.qty:
+			if new_qty_issued < allocation.qty:
 				updates["issued_via_stock_entry"] = None
-			frappe.db.set_value("Employee Request", employee_request.name, updates)
-		elif employee_request.issued_via_stock_entry == doc.name:
-			frappe.db.set_value("Employee Request", employee_request.name, "issued_via_stock_entry", None)
+			frappe.db.set_value("Material Request Item", allocation.name, updates)
+		elif allocation.issued_via_stock_entry == doc.name:
+			frappe.db.set_value("Material Request Item", allocation.name, "issued_via_stock_entry", None)
 
 
 def create_ppe_assignments(doc, method=None):
