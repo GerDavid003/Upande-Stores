@@ -96,7 +96,6 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 			"custom_farm": emp.custom_farm or "",
 			"custom_business_unit": emp.custom_business_unit or "",
 			"custom_ppe_issuance": 1,
-			"custom_employee_data": [{"employee": employee}],
 		}
 	)
 	for item in items:
@@ -105,6 +104,7 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 			{
 				"item_code": item["item_code"],
 				"qty": item["quantity"],
+				"employee": employee,
 				"schedule_date": today(),
 				"description": "PPE Issuance",
 			},
@@ -167,17 +167,19 @@ def create_bulk_ppe_material_request(assignments):
 	docs = _load_assignments(assignments)
 	first = _check_same_scope(docs)
 
+	# Merge by (employee, item_code), not item_code alone -- employee now
+	# lives on the item row directly, so a row can only ever belong to one
+	# employee. Two assignments for the same employee and same item still
+	# merge into one row with the summed quantity; different employees
+	# needing the same item get separate rows.
 	merged_items = {}
-	employees = set()
 	for assignment in docs:
 		if assignment.replacement_requested:
 			frappe.throw(_("{0} has already been requested for replacement.").format(assignment.name))
 		if not _assignment_eligible_for_replacement(assignment):
 			frappe.throw(_("{0} is not eligible for replacement.").format(assignment.name))
-		employees.add(assignment.employee)
-		merged_items[assignment.item_code] = merged_items.get(assignment.item_code, 0) + (
-			assignment.quantity or 1
-		)
+		key = (assignment.employee, assignment.item_code)
+		merged_items[key] = merged_items.get(key, 0) + (assignment.quantity or 1)
 
 	mr = frappe.get_doc(
 		{
@@ -188,13 +190,18 @@ def create_bulk_ppe_material_request(assignments):
 			"custom_farm": first.farm,
 			"custom_business_unit": first.business_unit,
 			"custom_ppe_issuance": 1,
-			"custom_employee_data": [{"employee": employee} for employee in employees],
 		}
 	)
-	for item_code, qty in merged_items.items():
+	for (employee, item_code), qty in merged_items.items():
 		mr.append(
 			"items",
-			{"item_code": item_code, "qty": qty, "schedule_date": today(), "description": "PPE Issuance"},
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"employee": employee,
+				"schedule_date": today(),
+				"description": "PPE Issuance",
+			},
 		)
 	mr.insert()
 

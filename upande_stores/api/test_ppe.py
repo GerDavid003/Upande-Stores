@@ -290,6 +290,21 @@ class IntegrationTestCreatePPEOnboardingMR(IntegrationTestCase):
 				items=json.dumps([{"item_code": item_code, "quantity": 1}]),
 			)
 
+	def test_sets_employee_on_every_item_row(self):
+		item_a = make_ppe_item(lifespan_months=6)
+		item_b = make_ppe_item(lifespan_months=7)
+		mr_name = create_ppe_onboarding_material_request(
+			onboarding=self.onboarding.name,
+			employee=self.employee,
+			items=json.dumps(
+				[{"item_code": item_a, "quantity": 1}, {"item_code": item_b, "quantity": 1}]
+			),
+		)
+		mr = frappe.get_doc("Material Request", mr_name)
+		self.assertEqual(len(mr.items), 2)
+		for row in mr.items:
+			self.assertEqual(row.employee, self.employee)
+
 
 class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
 	"""create_bulk_ppe_material_request() copies farm/business_unit from the
@@ -323,12 +338,12 @@ class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
 		if not self.farm or not self.business_unit:
 			self.skipTest("Need at least one Farm and one Business Unit record on this site.")
 
-	def _inactive_assignment(self):
+	def _inactive_assignment(self, employee=None, item_code=None):
 		return frappe.get_doc(
 			{
 				"doctype": "Employee PPE Assignment",
-				"employee": self.employee,
-				"item_code": make_ppe_item(),
+				"employee": employee or self.employee,
+				"item_code": item_code or make_ppe_item(),
 				"quantity": 1,
 				"company": "_Test Company",
 				"farm": self.farm,
@@ -352,6 +367,39 @@ class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
 		assignment.reload()
 		self.assertEqual(assignment.replacement_requested, 1)
 		self.assertEqual(assignment.replacement_material_request, mr_name)
+
+	def test_creates_item_row_with_employee_set(self):
+		assignment = self._inactive_assignment()
+		mr_name = create_bulk_ppe_material_request(json.dumps([assignment.name]))
+		mr = frappe.get_doc("Material Request", mr_name)
+		self.assertEqual(mr.items[0].employee, self.employee)
+
+	def test_merges_two_assignments_for_the_same_employee_and_item(self):
+		item_code = make_ppe_item(lifespan_months=6)
+		first = self._inactive_assignment(item_code=item_code)
+		second = self._inactive_assignment(item_code=item_code)
+
+		mr_name = create_bulk_ppe_material_request(json.dumps([first.name, second.name]))
+		mr = frappe.get_doc("Material Request", mr_name)
+
+		self.assertEqual(len(mr.items), 1)
+		self.assertEqual(mr.items[0].employee, self.employee)
+		self.assertEqual(mr.items[0].qty, 2)
+
+	def test_does_not_merge_across_different_employees(self):
+		employees = get_test_employees(count=2)
+		if len(employees) < 2:
+			self.skipTest("Need at least 2 Active Employee records on this site.")
+		emp1, emp2 = employees
+		item_code = make_ppe_item(lifespan_months=6)
+		first = self._inactive_assignment(employee=emp1, item_code=item_code)
+		second = self._inactive_assignment(employee=emp2, item_code=item_code)
+
+		mr_name = create_bulk_ppe_material_request(json.dumps([first.name, second.name]))
+		mr = frappe.get_doc("Material Request", mr_name)
+
+		self.assertEqual(len(mr.items), 2)
+		self.assertEqual({row.employee for row in mr.items}, {emp1, emp2})
 
 	def test_rejects_an_active_assignment_with_no_bad_inspection(self):
 		assignment = frappe.get_doc(
