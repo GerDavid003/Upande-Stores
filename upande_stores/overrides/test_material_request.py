@@ -9,7 +9,7 @@ from upande_stores.tests.test_helpers import (
 )
 
 
-class IntegrationTestMaterialRequestEmployeeValidation(IntegrationTestCase):
+class IntegrationTestMaterialRequestEmployeeAllocations(IntegrationTestCase):
 	def setUp(self):
 		farm, business_unit = get_test_farm_and_business_unit()
 		if not farm or not business_unit:
@@ -18,59 +18,61 @@ class IntegrationTestMaterialRequestEmployeeValidation(IntegrationTestCase):
 		if len(self.employees) < 2:
 			self.skipTest("Need at least 2 Active Employee records on this site.")
 
-	def test_rejects_duplicate_employee_in_employee_data(self):
+	def test_material_issue_requires_employee_on_every_row(self):
+		with self.assertRaises(frappe.ValidationError):
+			make_material_request(items=[{"item_code": "_Test Item", "qty": 1}])
+
+	def test_material_issue_with_employee_on_every_row_succeeds(self):
+		emp = self.employees[0]
+		mr = make_material_request(items=[{"employee": emp, "item_code": "_Test Item", "qty": 1}])
+		self.assertEqual(mr.items[0].employee, emp)
+
+	def test_material_issue_requires_employee_on_every_row_even_if_one_has_it(self):
 		emp = self.employees[0]
 		with self.assertRaises(frappe.ValidationError):
 			make_material_request(
-				employee_rows=[
-					{"employee": emp},
-					{"employee": emp},
+				items=[
+					{"employee": emp, "item_code": "_Test Item", "qty": 1},
+					{"item_code": "_Test Item 2", "qty": 1},
 				]
 			)
 
-	def test_allows_distinct_employees_in_employee_data(self):
-		emp1, emp2 = self.employees
+	def test_material_transfer_does_not_require_employee(self):
 		mr = make_material_request(
-			employee_rows=[
-				{"employee": emp1},
-				{"employee": emp2},
-			]
+			items=[{"item_code": "_Test Item", "qty": 1}],
+			material_request_type="Material Transfer",
 		)
-		self.assertEqual(len(mr.custom_employee_data), 2)
+		self.assertFalse(mr.items[0].employee)  # must not raise
 
 	def test_allows_same_employee_with_different_items(self):
 		emp = self.employees[0]
 		mr = make_material_request(
-			employee_rows=[
+			items=[
 				{"employee": emp, "item_code": "_Test Item", "qty": 5},
 				{"employee": emp, "item_code": "_Test Item 2", "qty": 3},
 			]
 		)
-		self.assertEqual(len(mr.custom_employee_data), 2)
+		self.assertEqual(len(mr.items), 2)
 
 	def test_rejects_duplicate_employee_and_item_pair(self):
 		emp = self.employees[0]
 		with self.assertRaises(frappe.ValidationError):
 			make_material_request(
-				employee_rows=[
+				items=[
 					{"employee": emp, "item_code": "_Test Item", "qty": 5},
 					{"employee": emp, "item_code": "_Test Item", "qty": 3},
 				]
 			)
 
-	def test_rejects_item_without_qty(self):
-		emp = self.employees[0]
-		with self.assertRaises(frappe.ValidationError):
-			make_material_request(
-				employee_rows=[{"employee": emp, "item_code": "_Test Item"}]
-			)
-
-	def test_rejects_item_with_zero_qty(self):
-		emp = self.employees[0]
-		with self.assertRaises(frappe.ValidationError):
-			make_material_request(
-				employee_rows=[{"employee": emp, "item_code": "_Test Item", "qty": 0}]
-			)
+	def test_allows_duplicate_item_when_employee_is_blank_on_both(self):
+		mr = make_material_request(
+			items=[
+				{"item_code": "_Test Item", "qty": 5},
+				{"item_code": "_Test Item", "qty": 3},
+			],
+			material_request_type="Material Transfer",
+		)
+		self.assertEqual(len(mr.items), 2)  # must not raise
 
 
 class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
@@ -106,7 +108,6 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
 				"custom_ppe_issuance": 1,
-				"custom_employee_data": [{"employee": self.employee}],
 				"items": [
 					{
 						"item_code": "_Test Item",
@@ -116,6 +117,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 						"conversion_factor": 1,
 						"schedule_date": frappe.utils.today(),
 						"warehouse": "Stores - KR",
+						"employee": self.employee,
 					}
 				],
 			}
@@ -143,7 +145,6 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 				"company": "Karen Roses",
 				"custom_farm": self.farm,
 				"custom_business_unit": self.business_unit,
-				"custom_employee_data": [{"employee": self.employee}],
 				"items": [
 					{
 						"item_code": "_Test Item",
@@ -153,6 +154,7 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 						"conversion_factor": 1,
 						"schedule_date": frappe.utils.today(),
 						"warehouse": "Stores - KR",
+						"employee": self.employee,
 					}
 				],
 			}
@@ -160,54 +162,6 @@ class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 		mr.insert(ignore_permissions=True)
 		mr.submit()
 		mr.cancel()  # must not raise
-
-
-class IntegrationTestMaterialRequestEmployeeMandatory(IntegrationTestCase):
-	def setUp(self):
-		farm, business_unit = get_test_farm_and_business_unit()
-		if not farm or not business_unit:
-			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
-		employees = get_test_employees(count=1)
-		if not employees:
-			self.skipTest("Need at least 1 Active Employee record on this site.")
-		self.employee = employees[0]
-
-	def test_material_issue_requires_at_least_one_employee_row(self):
-		with self.assertRaises(frappe.ValidationError):
-			make_material_request(employee_rows=[])
-
-	def test_material_issue_employee_row_requires_employee_field(self):
-		with self.assertRaises(frappe.ValidationError):
-			make_material_request(employee_rows=[{}])
-
-	def test_material_issue_with_a_populated_employee_row_succeeds(self):
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
-		self.assertEqual(len(mr.custom_employee_data), 1)
-
-	def test_material_transfer_does_not_require_employees(self):
-		farm, business_unit = get_test_farm_and_business_unit()
-		mr = frappe.get_doc(
-			{
-				"doctype": "Material Request",
-				"material_request_type": "Material Transfer",
-				"transaction_date": frappe.utils.today(),
-				"company": "_Test Company",
-				"custom_farm": farm,
-				"custom_business_unit": business_unit,
-				"items": [
-					{
-						"item_code": "_Test Item",
-						"qty": 1,
-						"uom": "_Test UOM",
-						"stock_uom": "_Test UOM",
-						"conversion_factor": 1,
-						"schedule_date": frappe.utils.today(),
-						"warehouse": "_Test Warehouse - _TC",
-					}
-				],
-			}
-		)
-		mr.insert(ignore_permissions=True)  # must not raise
 
 
 class IntegrationTestMaterialRequestAccountingDimensionSync(IntegrationTestCase):
@@ -221,66 +175,9 @@ class IntegrationTestMaterialRequestAccountingDimensionSync(IntegrationTestCase)
 		self.employee = employees[0]
 
 	def test_header_farm_and_business_unit_sync_to_every_item_row(self):
-		mr = make_material_request(employee_rows=[{"employee": self.employee}])
+		mr = make_material_request(items=[{"employee": self.employee}])
 		self.assertTrue(mr.custom_farm)
 		self.assertTrue(mr.custom_business_unit)
 		for row in mr.items:
 			self.assertEqual(row.farm, mr.custom_farm)
 			self.assertEqual(row.business_unit, mr.custom_business_unit)
-
-
-class IntegrationTestMaterialRequestAllocationItemSync(IntegrationTestCase):
-	def setUp(self):
-		farm, business_unit = get_test_farm_and_business_unit()
-		if not farm or not business_unit:
-			self.skipTest("No Farm/Business Unit record on this site to build a valid test Material Request.")
-		self.employees = get_test_employees(count=2)
-		if len(self.employees) < 2:
-			self.skipTest("Need at least 2 Active Employee records on this site.")
-
-	def test_items_table_is_derived_from_employee_allocations(self):
-		emp1, emp2 = self.employees
-		mr = make_material_request(
-			employee_rows=[
-				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
-				{"employee": emp2, "item_code": "_Test Item 2", "qty": 4},
-			]
-		)
-		by_item = {row.item_code: row.qty for row in mr.items}
-		self.assertEqual(by_item, {"_Test Item": 10, "_Test Item 2": 4})
-
-	def test_allocations_for_the_same_item_are_summed(self):
-		emp1, emp2 = self.employees
-		mr = make_material_request(
-			employee_rows=[
-				{"employee": emp1, "item_code": "_Test Item", "qty": 10},
-				{"employee": emp2, "item_code": "_Test Item", "qty": 4},
-			]
-		)
-		self.assertEqual(len(mr.items), 1)
-		self.assertEqual(mr.items[0].item_code, "_Test Item")
-		self.assertEqual(mr.items[0].qty, 14)
-
-	def test_blank_item_code_rows_leave_items_table_untouched(self):
-		# The PPE workflow's own shape: no employee row has item_code set, so
-		# this hook must no-op and leave whatever the caller put in `items`.
-		emp = self.employees[0]
-		mr = make_material_request(employee_rows=[{"employee": emp}], item_code="_Test Item", qty=7)
-		self.assertEqual(len(mr.items), 1)
-		self.assertEqual(mr.items[0].item_code, "_Test Item")
-		self.assertEqual(mr.items[0].qty, 7)
-
-	def test_derived_item_row_carries_forward_an_existing_warehouse(self):
-		# Simulates re-saving a Material Request that already had its Items
-		# table filled in with a warehouse (e.g. from an earlier save, before
-		# qty changed) -- the derived row must not silently drop it.
-		emp = self.employees[0]
-		mr = make_material_request(employee_rows=[{"employee": emp, "item_code": "_Test Item", "qty": 5}])
-		self.assertEqual(mr.items[0].warehouse, "Stores - KR")
-
-		mr.custom_employee_data[0].qty = 8
-		mr.save()
-
-		self.assertEqual(len(mr.items), 1)
-		self.assertEqual(mr.items[0].qty, 8)
-		self.assertEqual(mr.items[0].warehouse, "Stores - KR")
