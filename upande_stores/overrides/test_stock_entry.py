@@ -21,7 +21,7 @@ class IntegrationTestStockEntryEmployeeLock(IntegrationTestCase):
 			self.skipTest("Need at least 1 Active Employee record on this site.")
 		self.employee = employees[0]
 
-	def test_submit_locks_the_employee_request_row(self):
+	def test_submit_locks_the_allocation_row(self):
 		mr = make_material_request(items=[{"employee": self.employee}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		se.submit()
@@ -31,7 +31,7 @@ class IntegrationTestStockEntryEmployeeLock(IntegrationTestCase):
 			se.name,
 		)
 
-	def test_cancel_unlocks_the_employee_request_row(self):
+	def test_cancel_unlocks_the_allocation_row(self):
 		mr = make_material_request(items=[{"employee": self.employee}])
 		se = make_stock_entry_for_material_request(mr, bio_employee=self.employee)
 		se.submit()
@@ -616,12 +616,31 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertEqual(row.issued_via_stock_entry, second.name)
 
 	def test_issuance_after_full_satisfaction_is_blocked(self):
+		# This scenario (qty 5 allocated, fully issued, then 1 more attempted)
+		# also trips ERPNext's own core "can't issue more than requested
+		# quantity" guard (Material Request.update_completed_qty, part of the
+		# standard controller flow that runs before this app's doc_events
+		# hooks), which would make this test pass for the wrong reason and
+		# leave this app's own "already fully issued" throw with no real
+		# coverage. Stock Settings.mr_qty_allowance (verified in
+		# erpnext/stock/doctype/material_request/material_request.py's
+		# update_completed_qty: when set, an allowed_qty of
+		# stock_qty + stock_qty * mr_qty_allowance/100 is tolerated before
+		# ERPNext's own throw fires) is raised generously here so ERPNext's
+		# guard does not fire for this 1-unit overshoot on a qty-5
+		# allocation, isolating this app's own guard as the one under test.
+		original_allowance = frappe.db.get_single_value("Stock Settings", "mr_qty_allowance")
+		frappe.db.set_single_value("Stock Settings", "mr_qty_allowance", 100)
+		self.addCleanup(
+			frappe.db.set_single_value, "Stock Settings", "mr_qty_allowance", original_allowance
+		)
+
 		mr = make_material_request(items=[{"employee": self.employee, "item_code": "_Test Item", "qty": 5}])
 		first = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=5)
 		first.submit()
 
 		second = make_stock_entry_for_material_request(mr, bio_employee=self.employee, qty=1)
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaisesRegex(frappe.ValidationError, "already been fully issued"):
 			second.submit()
 
 	def test_cancelling_a_partial_issuance_reduces_qty_issued(self):
