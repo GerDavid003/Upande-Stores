@@ -86,3 +86,38 @@ class PPEInspection(Document):
 			assignment = frappe.get_doc("Employee PPE Assignment", row.employee_ppe_assignment)
 			assignment.status = row.previous_status
 			assignment.save(ignore_permissions=True)
+
+	def on_trash(self):
+		# Employee PPE Assignment.last_inspection is stamped by on_submit and
+		# deliberately left in place by on_cancel (see
+		# test_cancel_leaves_last_inspection_fields_stamped) -- so a cancelled
+		# inspection is still linked from the assignment it was for when it
+		# reaches delete. Clear that link (and the two fields describing it)
+		# so it doesn't block this delete via delete_doc's link check.
+		assignments = frappe.get_all(
+			"Employee PPE Assignment", filters={"last_inspection": self.name}, pluck="name"
+		)
+		for name in assignments:
+			frappe.db.set_value(
+				"Employee PPE Assignment",
+				name,
+				{"last_inspection": None, "last_inspection_date": None, "last_inspection_status": None},
+			)
+
+		# Employee PPE History rows sync ppe_inspection/last_inspection_date/
+		# last_inspection_status from a submitted inspection, and on_cancel
+		# deliberately leaves them stamped -- so a cancelled inspection can
+		# still be linked from a History row when it reaches delete. Clear the
+		# link (not the whole row -- it's a historical record) so that inbound
+		# link doesn't block this delete via delete_doc's link check.
+		if "upande_hr" not in frappe.get_installed_apps():
+			return
+		history_rows = frappe.get_all(
+			"Employee PPE History", filters={"ppe_inspection": self.name}, pluck="name"
+		)
+		for name in history_rows:
+			frappe.db.set_value(
+				"Employee PPE History",
+				name,
+				{"ppe_inspection": None, "last_inspection_date": None, "last_inspection_status": None},
+			)

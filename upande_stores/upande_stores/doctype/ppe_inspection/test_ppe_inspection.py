@@ -260,6 +260,61 @@ class IntegrationTestPPEInspection(IntegrationTestCase):
 		self.assertEqual(assignment.last_inspection_status, "OK")
 		self.assertEqual(assignment.last_inspection, inspection.name)
 
+	def test_delete_after_cancel_is_not_blocked_by_assignment_last_inspection(self):
+		# on_submit stamps last_inspection onto the Employee PPE Assignment,
+		# and on_cancel deliberately leaves it stamped (see
+		# test_cancel_leaves_last_inspection_fields_stamped) -- so by the time
+		# a cancelled inspection reaches delete, the assignment still links
+		# back to it. Deleting must not be blocked by that link. Unlike the
+		# Employee PPE History case below, this link exists regardless of
+		# whether upande_hr is installed.
+		assignment = self._assignment(status="Active")
+		inspection = self._submit_inspection(assignment, "Lost")
+		inspection.cancel()
+
+		assignment.reload()
+		self.assertEqual(assignment.last_inspection, inspection.name)
+
+		frappe.delete_doc("PPE Inspection", inspection.name, ignore_permissions=True)  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("PPE Inspection", inspection.name))
+		self.assertTrue(frappe.db.exists("Employee PPE Assignment", assignment.name))
+		assignment.reload()
+		self.assertFalse(assignment.last_inspection)
+		self.assertFalse(assignment.last_inspection_date)
+		self.assertFalse(assignment.last_inspection_status)
+
+	def test_delete_after_cancel_is_not_blocked_by_employee_ppe_history(self):
+		# Employee PPE History rows sync ppe_inspection/last_inspection_date/
+		# last_inspection_status from a submitted inspection (Finding 4), and
+		# on_cancel deliberately leaves them stamped (see
+		# test_cancel_leaves_last_inspection_fields_stamped) -- so by the time
+		# a cancelled inspection reaches delete, those History rows still
+		# point at it. Deleting must not be blocked by that link.
+		if "upande_hr" not in frappe.get_installed_apps():
+			self.skipTest("upande_hr not installed on this site.")
+
+		assignment = self._assignment(status="Active")
+		inspection = self._submit_inspection(assignment, "Lost")
+		inspection.cancel()
+
+		history_row_name = frappe.db.get_value(
+			"Employee PPE History", {"ppe_assignment": assignment.name, "parent": self.employee}, "name"
+		)
+		self.assertTrue(history_row_name)
+		self.assertEqual(
+			frappe.db.get_value("Employee PPE History", history_row_name, "ppe_inspection"),
+			inspection.name,
+		)
+
+		frappe.delete_doc("PPE Inspection", inspection.name, ignore_permissions=True)  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("PPE Inspection", inspection.name))
+		# The history row itself survives as a historical record, just no
+		# longer linked to the (now-deleted) inspection.
+		self.assertTrue(frappe.db.exists("Employee PPE History", history_row_name))
+		self.assertFalse(frappe.db.get_value("Employee PPE History", history_row_name, "ppe_inspection"))
+
 	def test_duplicate_assignment_rows_are_blocked_on_validate(self):
 		# Finding 3: the same employee_ppe_assignment appearing twice in
 		# items_inspected must be rejected at save time, before submit is

@@ -134,6 +134,83 @@ class IntegrationTestEmployeePPEAssignment(IntegrationTestCase):
 			frappe.db.exists("Employee PPE History", {"ppe_assignment": name, "parent": self.employee})
 		)
 
+	def test_on_trash_clears_inbound_replacement_assignment_link(self):
+		# A prior assignment's replacement_assignment can point at this one (the
+		# PPE replacement flow) -- that inbound link must not block a direct
+		# delete of this assignment via the Desk UI, not just when triggered
+		# indirectly by a Stock Entry cancel (which already handled this).
+		item_code = make_ppe_item()
+		new_assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": item_code,
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+		old_assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": item_code,
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2025-06-01",
+				"lifespan_months": 6,
+				"status": "Inactive",
+				"replacement_assignment": new_assignment.name,
+			}
+		).insert(ignore_permissions=True)
+
+		frappe.delete_doc(
+			"Employee PPE Assignment", new_assignment.name, ignore_permissions=True
+		)  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", new_assignment.name))
+		self.assertFalse(
+			frappe.db.get_value("Employee PPE Assignment", old_assignment.name, "replacement_assignment")
+		)
+
+	def test_on_trash_clears_ppe_inspection_item_link(self):
+		# A PPE Inspection Item child row can hold a link to this assignment --
+		# cancelling the inspection it belongs to does not clear that link
+		# (PPEInspection.on_cancel only reverts the assignment's status). A
+		# direct delete of this assignment must not be blocked by it, not just
+		# when triggered indirectly by a Stock Entry cancel (which already
+		# handled this).
+		if not frappe.db.get_value("Farm", {}, "name"):
+			self.skipTest("No Farm record available to build a PPE Inspection link target.")
+
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+		inspection_name = _make_ppe_inspection_for(self.employee, assignment)
+		item_row_name = frappe.db.get_value(
+			"PPE Inspection Item", {"employee_ppe_assignment": assignment.name}, "name"
+		)
+		self.assertTrue(item_row_name)
+
+		frappe.delete_doc(
+			"Employee PPE Assignment", assignment.name, ignore_permissions=True
+		)  # must not raise LinkExistsError
+
+		self.assertFalse(frappe.db.exists("Employee PPE Assignment", assignment.name))
+		self.assertFalse(frappe.db.get_value("PPE Inspection Item", item_row_name, "employee_ppe_assignment"))
+		self.assertTrue(frappe.db.exists("PPE Inspection", inspection_name))
+
 	def test_syncs_ppe_inspection_link_into_history(self):
 		# Finding 4: on_update must push last_inspection into the history row's
 		# ppe_inspection link (previously declared but never populated).
