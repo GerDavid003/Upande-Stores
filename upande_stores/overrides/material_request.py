@@ -48,6 +48,42 @@ def validate_employee_allocations(doc, method=None):
 		seen.add(key)
 
 
+def block_reallocation_after_issuance(doc, method=None):
+	"""Material Request validate hook: once a row has tracked issuance
+	(qty_issued > 0 or issued_via_stock_entry set), its employee/item_code
+	must not change. A real, already-submitted Stock Entry points at this
+	exact row (via Stock Entry Detail.material_request_item) and recorded
+	who actually received it -- letting the row's employee/item_code drift
+	afterwards leaves the row describing a different allocation while that
+	Stock Entry still says the original person received it, with no way to
+	reconcile the two.
+
+	Rows with no tracked issuance yet are unrestricted -- reassigning a
+	still-open allocation is a normal edit. New rows (nothing to compare
+	against) are also unrestricted.
+	"""
+	if doc.is_new():
+		return
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+	before_rows = {row.name: row for row in before.items}
+	for row in doc.items:
+		before_row = before_rows.get(row.name)
+		if not before_row:
+			continue
+		if not before_row.qty_issued and not before_row.issued_via_stock_entry:
+			continue
+		if row.employee != before_row.employee or row.item_code != before_row.item_code:
+			frappe.throw(
+				_(
+					"Row {0}: cannot change Employee or Item Code -- Stock Entry {1} was already"
+					" issued against this allocation. Cancel that Stock Entry first, or use a new"
+					" row instead."
+				).format(row.idx, frappe.bold(before_row.issued_via_stock_entry or _("a prior entry")))
+			)
+
+
 def sync_accounting_dimensions_to_items(doc, method=None):
 	"""Material Request validate: custom_farm/custom_business_unit are
 	header-level, user-facing pick fields, but the Farm/Business Unit

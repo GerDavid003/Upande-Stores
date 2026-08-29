@@ -74,6 +74,64 @@ class IntegrationTestMaterialRequestEmployeeAllocations(IntegrationTestCase):
 		)
 		self.assertEqual(len(mr.items), 2)  # must not raise
 
+	def test_reassigning_employee_before_any_issuance_is_allowed(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(items=[{"employee": emp1, "item_code": "_Test Item", "qty": 1}])
+		mr.items[0].employee = emp2
+		mr.save(ignore_permissions=True)  # must not raise
+		self.assertEqual(mr.items[0].employee, emp2)
+
+	def test_blocks_reassigning_employee_after_issuance_is_tracked(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(items=[{"employee": emp1, "item_code": "_Test Item", "qty": 1}])
+		# Simulate lock_issued_employee having already recorded a real
+		# issuance against this row (bypassing the actual Stock Entry flow --
+		# only the row's own tracked-issuance fields matter to this guard).
+		frappe.db.set_value(
+			"Material Request Item", mr.items[0].name, {"qty_issued": 1, "issued_via_stock_entry": "SE-0001"}
+		)
+		mr.reload()
+		mr.items[0].employee = emp2
+		mr.flags.ignore_links = True
+		with self.assertRaises(frappe.ValidationError):
+			mr.save(ignore_permissions=True)
+
+	def test_blocks_reassigning_item_code_after_issuance_is_tracked(self):
+		emp = self.employees[0]
+		mr = make_material_request(items=[{"employee": emp, "item_code": "_Test Item", "qty": 1}])
+		frappe.db.set_value(
+			"Material Request Item", mr.items[0].name, {"qty_issued": 1, "issued_via_stock_entry": "SE-0001"}
+		)
+		mr.reload()
+		mr.items[0].item_code = "_Test Item 2"
+		mr.flags.ignore_links = True
+		with self.assertRaises(frappe.ValidationError):
+			mr.save(ignore_permissions=True)
+
+	def test_allows_unrelated_edits_after_issuance_is_tracked(self):
+		emp = self.employees[0]
+		mr = make_material_request(items=[{"employee": emp, "item_code": "_Test Item", "qty": 1}])
+		frappe.db.set_value(
+			"Material Request Item", mr.items[0].name, {"qty_issued": 1, "issued_via_stock_entry": "SE-0001"}
+		)
+		mr.reload()
+		mr.items[0].description = "updated remark"
+		mr.flags.ignore_links = True
+		mr.save(ignore_permissions=True)  # must not raise
+		self.assertEqual(mr.items[0].description, "updated remark")
+
+	def test_new_row_is_not_blocked_by_a_sibling_rows_issuance(self):
+		emp1, emp2 = self.employees
+		mr = make_material_request(items=[{"employee": emp1, "item_code": "_Test Item", "qty": 1}])
+		frappe.db.set_value(
+			"Material Request Item", mr.items[0].name, {"qty_issued": 1, "issued_via_stock_entry": "SE-0001"}
+		)
+		mr.reload()
+		mr.append("items", {"employee": emp2, "item_code": "_Test Item 2", "qty": 1})
+		mr.flags.ignore_links = True
+		mr.save(ignore_permissions=True)  # must not raise
+		self.assertEqual(len(mr.items), 2)
+
 
 class IntegrationTestMaterialRequestPPEUnlink(IntegrationTestCase):
 	def setUp(self):

@@ -146,6 +146,7 @@ doc_events = {
 		"validate": [
 			"upande_stores.overrides.material_request.validate_employee_required_for_material_issue",
 			"upande_stores.overrides.material_request.validate_employee_allocations",
+			"upande_stores.overrides.material_request.block_reallocation_after_issuance",
 			"upande_stores.overrides.material_request.sync_accounting_dimensions_to_items",
 		],
 		"on_cancel": "upande_stores.overrides.material_request.unlink_ppe_replacement",
