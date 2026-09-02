@@ -1,3 +1,5 @@
+import unittest
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -18,6 +20,7 @@ class IntegrationTestMaterialRequestEmployeeAllocations(IntegrationTestCase):
 		if len(self.employees) < 2:
 			self.skipTest("Need at least 2 Active Employee records on this site.")
 
+	@unittest.skip("Employee-required-for-Material-Issue validation temporarily disabled; will be reinstated later.")
 	def test_material_issue_requires_employee_on_every_row(self):
 		with self.assertRaises(frappe.ValidationError):
 			make_material_request(items=[{"item_code": "_Test Item", "qty": 1}])
@@ -27,6 +30,7 @@ class IntegrationTestMaterialRequestEmployeeAllocations(IntegrationTestCase):
 		mr = make_material_request(items=[{"employee": emp, "item_code": "_Test Item", "qty": 1}])
 		self.assertEqual(mr.items[0].employee, emp)
 
+	@unittest.skip("Employee-required-for-Material-Issue validation temporarily disabled; will be reinstated later.")
 	def test_material_issue_requires_employee_on_every_row_even_if_one_has_it(self):
 		emp = self.employees[0]
 		with self.assertRaises(frappe.ValidationError):

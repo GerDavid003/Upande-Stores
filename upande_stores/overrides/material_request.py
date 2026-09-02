@@ -14,6 +14,9 @@ def validate_employee_required_for_material_issue(doc, method=None):
 	is never enforced server-side in this Frappe version
 	(frappe.model.base_document.BaseDocument._get_missing_mandatory_fields
 	only ever checks the static reqd flag).
+
+	Currently unregistered in hooks.py (temporarily disabled); re-add to the
+	Material Request "validate" doc_events list to reinstate.
 	"""
 	if doc.material_request_type != "Material Issue":
 		return
