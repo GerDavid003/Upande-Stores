@@ -107,6 +107,7 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 				"employee": employee,
 				"schedule_date": today(),
 				"description": "PPE Issuance",
+				"custom_purpose": "PPE Issuing",
 			},
 		)
 	mr.insert()
@@ -201,6 +202,7 @@ def create_bulk_ppe_material_request(assignments):
 				"employee": employee,
 				"schedule_date": today(),
 				"description": "PPE Issuance",
+				"custom_purpose": "PPE Issuing",
 			},
 		)
 	mr.insert()
@@ -255,6 +257,7 @@ def create_bulk_ppe_purchase_request(assignments):
 				"qty": qty,
 				"schedule_date": add_months(today(), 1),
 				"description": "PPE Purchase",
+				"custom_purpose": "PPE Issuing",
 			},
 		)
 	mr.insert()

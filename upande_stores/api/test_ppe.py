@@ -250,6 +250,7 @@ class IntegrationTestCreatePPEOnboardingMR(IntegrationTestCase):
 		self.assertEqual(mr.material_request_type, "Material Issue")
 		self.assertEqual(mr.custom_ppe_issuance, 1)
 		self.assertEqual(mr.items[0].description, "PPE Issuance")
+		self.assertEqual(mr.items[0].custom_purpose, "PPE Issuing")
 		self.onboarding.reload()
 		self.assertEqual(self.onboarding.custom_ppe_material_request, mr_name)
 
@@ -363,6 +364,7 @@ class IntegrationTestCreateBulkPPEMaterialRequest(IntegrationTestCase):
 		self.assertEqual(mr.material_request_type, "Material Issue")
 		self.assertEqual(mr.custom_ppe_issuance, 1)
 		self.assertEqual(mr.items[0].description, "PPE Issuance")
+		self.assertEqual(mr.items[0].custom_purpose, "PPE Issuing")
 
 		assignment.reload()
 		self.assertEqual(assignment.replacement_requested, 1)
@@ -518,6 +520,7 @@ class IntegrationTestCreateBulkPPEPurchaseRequest(IntegrationTestCase):
 		self.assertEqual(mr.material_request_type, "Purchase")
 		self.assertFalse(mr.custom_ppe_issuance)
 		self.assertEqual(mr.items[0].description, "PPE Purchase")
+		self.assertEqual(mr.items[0].custom_purpose, "PPE Issuing")
 
 		assignment.reload()
 		self.assertEqual(assignment.replacement_purchase_request, mr_name)
