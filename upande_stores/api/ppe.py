@@ -1,8 +1,31 @@
 import json
 
 import frappe
+from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
+from erpnext.stock.doctype.item.item import get_item_defaults
 from frappe import _
 from frappe.utils import add_months, today
+
+
+def _default_warehouse(item_code, company):
+	"""The warehouse a Material Request Item row for `item_code`/`company`
+	should use, mirroring core ERPNext's own resolution order (see
+	erpnext.stock.get_item_details.get_item_warehouse_): the Item's own
+	default warehouse for this company, falling back to its Item Group's,
+	falling back to Stock Settings' global default. Material Request Item's
+	own warehouse field is mandatory for any stock item -- these bulk-created
+	rows never went through the Desk form's client-side item-defaults fetch,
+	so nothing else would ever populate it.
+	"""
+	item_defaults = get_item_defaults(item_code, company) or {}
+	if item_defaults.get("default_warehouse"):
+		return item_defaults["default_warehouse"]
+
+	item_group_defaults = get_item_group_defaults(item_code, company) or {}
+	if item_group_defaults.get("default_warehouse"):
+		return item_group_defaults["default_warehouse"]
+
+	return frappe.get_single_value("Stock Settings", "default_warehouse")
 
 
 def _matching_ppe_policies(company, department, designation):
@@ -108,6 +131,7 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 				"schedule_date": today(),
 				"description": "PPE Issuance",
 				"custom_purpose": "PPE Issuing",
+				"warehouse": _default_warehouse(item["item_code"], emp.company),
 			},
 		)
 	mr.insert()
@@ -203,6 +227,7 @@ def create_bulk_ppe_material_request(assignments):
 				"schedule_date": today(),
 				"description": "PPE Issuance",
 				"custom_purpose": "PPE Issuing",
+				"warehouse": _default_warehouse(item_code, first.company),
 			},
 		)
 	mr.insert()
@@ -258,6 +283,7 @@ def create_bulk_ppe_purchase_request(assignments):
 				"schedule_date": add_months(today(), 1),
 				"description": "PPE Purchase",
 				"custom_purpose": "PPE Issuing",
+				"warehouse": _default_warehouse(item_code, first.company),
 			},
 		)
 	mr.insert()
