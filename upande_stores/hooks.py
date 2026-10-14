@@ -43,7 +43,10 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Stock Entry": "public/js/stock_entry.js",
+	"Material Request": "public/js/material_request.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -86,7 +89,8 @@ app_license = "mit"
 # ------------
 
 # before_install = "upande_stores.install.before_install"
-# after_install = "upande_stores.install.after_install"
+after_install = "upande_stores.install.after_install"
+after_migrate = "upande_stores.install.after_migrate"
 
 # Uninstallation
 # ------------
@@ -138,13 +142,11 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Stock Settings": {"validate": "upande_stores.employee_issuance.validate_stock_settings"},
+	"Material Request": {"validate": "upande_stores.employee_issuance.validate_material_request"},
+	"Stock Entry": {"validate": "upande_stores.employee_issuance.validate_stock_entry"},
+}
 
 # Scheduled Tasks
 # ---------------
