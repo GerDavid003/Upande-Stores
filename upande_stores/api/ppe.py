@@ -28,6 +28,22 @@ def _default_warehouse(item_code, company):
 	return frappe.get_single_value("Stock Settings", "default_warehouse")
 
 
+def _default_cost_center(item_code, company):
+	"""Same resolution order as `_default_warehouse`, for the buying cost
+	center: the Item's own default for this company, falling back to its
+	Item Group's. Used only when there's no Employee PPE Assignment to pull
+	`cost_center` from directly (onboarding's initial issuance has no prior
+	assignment), or as a last resort when an assignment's own `cost_center`
+	is blank.
+	"""
+	item_defaults = get_item_defaults(item_code, company) or {}
+	if item_defaults.get("buying_cost_center"):
+		return item_defaults["buying_cost_center"]
+
+	item_group_defaults = get_item_group_defaults(item_code, company) or {}
+	return item_group_defaults.get("buying_cost_center")
+
+
 def _matching_ppe_policies(company, department, designation):
 	"""Active PPE Policies for this exact company where department/designation
 	are either unset on the policy (wildcard) or match exactly."""
@@ -132,6 +148,7 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 				"description": "PPE Issuance",
 				"custom_purpose": "PPE Issuing",
 				"warehouse": _default_warehouse(item["item_code"], emp.company),
+				"cost_center": _default_cost_center(item["item_code"], emp.company),
 			},
 		)
 	mr.insert()
@@ -141,6 +158,11 @@ def create_ppe_onboarding_material_request(onboarding, employee, items):
 
 
 def _assignment_eligible_for_replacement(assignment):
+	if assignment.status == "Replaced":
+		# Already superseded by a real replacement assignment -- a stale
+		# last_inspection_status of "Worn Out"/"Lost" from before it was
+		# replaced must not make it look eligible again.
+		return False
 	return assignment.status in ("Inactive", "Expired", "Returned") or assignment.last_inspection_status in (
 		"Worn Out",
 		"Lost",
@@ -196,7 +218,10 @@ def create_bulk_ppe_material_request(assignments):
 	# lives on the item row directly, so a row can only ever belong to one
 	# employee. Two assignments for the same employee and same item still
 	# merge into one row with the summed quantity; different employees
-	# needing the same item get separate rows.
+	# needing the same item get separate rows. cost_center is fetched from
+	# the assignment being replaced (falling back to the item/item group
+	# default when the assignment itself has none set) -- the last
+	# assignment seen for a merged key wins, same as qty accumulates.
 	merged_items = {}
 	for assignment in docs:
 		if assignment.replacement_requested:
@@ -204,7 +229,9 @@ def create_bulk_ppe_material_request(assignments):
 		if not _assignment_eligible_for_replacement(assignment):
 			frappe.throw(_("{0} is not eligible for replacement.").format(assignment.name))
 		key = (assignment.employee, assignment.item_code)
-		merged_items[key] = merged_items.get(key, 0) + (assignment.quantity or 1)
+		row = merged_items.setdefault(key, {"qty": 0, "cost_center": None})
+		row["qty"] += assignment.quantity or 1
+		row["cost_center"] = assignment.cost_center or row["cost_center"]
 
 	mr = frappe.get_doc(
 		{
@@ -217,17 +244,18 @@ def create_bulk_ppe_material_request(assignments):
 			"custom_ppe_issuance": 1,
 		}
 	)
-	for (employee, item_code), qty in merged_items.items():
+	for (employee, item_code), row in merged_items.items():
 		mr.append(
 			"items",
 			{
 				"item_code": item_code,
-				"qty": qty,
+				"qty": row["qty"],
 				"employee": employee,
 				"schedule_date": today(),
 				"description": "PPE Issuance",
 				"custom_purpose": "PPE Issuing",
 				"warehouse": _default_warehouse(item_code, first.company),
+				"cost_center": row["cost_center"] or _default_cost_center(item_code, first.company),
 			},
 		)
 	mr.insert()
@@ -260,9 +288,9 @@ def create_bulk_ppe_purchase_request(assignments):
 					assignment.name, assignment.replacement_purchase_request
 				)
 			)
-		merged_items[assignment.item_code] = merged_items.get(assignment.item_code, 0) + (
-			assignment.quantity or 1
-		)
+		row = merged_items.setdefault(assignment.item_code, {"qty": 0, "cost_center": None})
+		row["qty"] += assignment.quantity or 1
+		row["cost_center"] = assignment.cost_center or row["cost_center"]
 
 	mr = frappe.get_doc(
 		{
@@ -274,16 +302,17 @@ def create_bulk_ppe_purchase_request(assignments):
 			"custom_business_unit": first.business_unit,
 		}
 	)
-	for item_code, qty in merged_items.items():
+	for item_code, row in merged_items.items():
 		mr.append(
 			"items",
 			{
 				"item_code": item_code,
-				"qty": qty,
+				"qty": row["qty"],
 				"schedule_date": add_months(today(), 1),
 				"description": "PPE Purchase",
 				"custom_purpose": "PPE Issuing",
 				"warehouse": _default_warehouse(item_code, first.company),
+				"cost_center": row["cost_center"] or _default_cost_center(item_code, first.company),
 			},
 		)
 	mr.insert()

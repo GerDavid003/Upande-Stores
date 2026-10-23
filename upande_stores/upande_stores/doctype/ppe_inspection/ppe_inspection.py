@@ -61,12 +61,15 @@ class PPEInspection(Document):
 
 			if row.current_status in ("Worn Out", "Lost"):
 				assignment.status = "Inactive"
-			elif row.current_status == "OK" and assignment.status != "Expired":
+			elif row.current_status == "OK" and assignment.status not in ("Expired", "Replaced"):
 				# Finding 1: an OK verdict still reactivates a previously Inactive
 				# assignment, but must not flip an Expired assignment back to
 				# Active -- the daily auto-expiry job would just silently undo
 				# that within a day anyway. last_inspection_date/_status/_ are
 				# stamped above regardless; only this status mutation is gated.
+				# Replaced is excluded the same way: a newer assignment already
+				# covers this employee/item, so an OK verdict on the superseded
+				# one must not resurrect it into a second Active assignment.
 				assignment.status = "Active"
 
 			assignment.save(ignore_permissions=True)

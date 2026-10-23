@@ -15,6 +15,7 @@
   "company",
   "farm",
   "business_unit",
+  "cost_center",
   "column_break_xbtf",
   "issue_date",
   "lifespan_months",
@@ -41,18 +42,19 @@
   {"fieldname": "company", "fieldtype": "Link", "in_standard_filter": 1, "label": "Company", "options": "Company", "read_only": 1, "reqd": 1},
   {"fieldname": "farm", "fieldtype": "Link", "label": "Farm", "options": "Farm"},
   {"fieldname": "business_unit", "fieldtype": "Link", "label": "Business Unit", "options": "Business Unit"},
+  {"fieldname": "cost_center", "fieldtype": "Link", "label": "Cost Center", "options": "Cost Center"},
   {"fieldname": "column_break_xbtf", "fieldtype": "Column Break"},
   {"fieldname": "issue_date", "fieldtype": "Date", "label": "Issue Date", "read_only": 1, "reqd": 1},
   {"fieldname": "lifespan_months", "fieldtype": "Int", "label": "Lifespan (Months)", "read_only": 1},
   {"fieldname": "expiry_date", "fieldtype": "Date", "label": "Estimated Expiry", "read_only": 1, "search_index": 1},
   {"fieldname": "stock_entry", "fieldtype": "Link", "label": "Stock Entry", "options": "Stock Entry", "read_only": 1},
-  {"fieldname": "status", "fieldtype": "Select", "in_standard_filter": 1, "label": "Status", "options": "Active\nInactive\nExpired\nReturned", "reqd": 1, "search_index": 1},
+  {"fieldname": "status", "fieldtype": "Select", "in_standard_filter": 1, "label": "Status", "options": "Active\nInactive\nExpired\nReturned\nReplaced", "reqd": 1, "search_index": 1},
   {"depends_on": "eval:doc.status == \"Returned\"", "fieldname": "returned_date", "fieldtype": "Date", "label": "Returned Date"},
   {"fieldname": "last_inspection_date", "fieldtype": "Date", "label": "Last Inspection Date", "read_only": 1},
   {"fieldname": "last_inspection_status", "fieldtype": "Select", "label": "Last Inspection Status", "options": "OK\nWorn Out\nLost", "read_only": 1},
   {"fieldname": "last_inspection", "fieldtype": "Link", "label": "Last Inspection", "options": "PPE Inspection", "read_only": 1},
   {"default": "0", "fieldname": "replacement_requested", "fieldtype": "Check", "hidden": 1, "label": "Replacement Requested"},
-  {"depends_on": "eval:doc.replacement_requested", "fieldname": "replacement_section", "fieldtype": "Section Break", "label": "Replacement Tracking"},
+  {"depends_on": "eval:doc.replacement_requested || doc.replacement_assignment", "fieldname": "replacement_section", "fieldtype": "Section Break", "label": "Replacement Tracking"},
   {"fieldname": "replacement_material_request", "fieldtype": "Link", "label": "Replacement Material Request", "options": "Material Request", "read_only": 1},
   {"fieldname": "replacement_purchase_request", "fieldtype": "Link", "label": "Purchase Request", "options": "Material Request", "read_only": 1},
   {"fieldname": "replacement_assignment", "fieldtype": "Link", "label": "Replacement Assignment", "options": "Employee PPE Assignment", "read_only": 1}
@@ -77,7 +79,8 @@
  "states": [
   {"color": "Green", "title": "Active"},
   {"color": "Red", "title": "Expired"},
-  {"color": "Yellow", "title": "Returned"}
+  {"color": "Yellow", "title": "Returned"},
+  {"color": "Blue", "title": "Replaced"}
  ],
  "track_changes": 1
 }

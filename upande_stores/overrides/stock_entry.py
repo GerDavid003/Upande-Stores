@@ -201,12 +201,6 @@ def create_ppe_assignments(doc, method=None):
 	employee = doc.bio_employee
 	employee_name = frappe.db.get_value("Employee", employee, "employee_name")
 
-	material_request = _resolve_material_request(doc)
-	is_ppe_issuance = bool(
-		material_request
-		and frappe.db.get_value("Material Request", material_request, "custom_ppe_issuance")
-	)
-
 	for row in doc.items:
 		if not row.item_code or not row.qty or row.qty <= 0:
 			continue
@@ -227,7 +221,6 @@ def create_ppe_assignments(doc, method=None):
 		# for_update gave the appearance of a fix without the substance, so it's
 		# reverted here. Known, accepted gap: two people issuing the exact same
 		# item to the exact same employee at the exact same instant could both
-		# this is a random comment
 		# pass this check and both insert. This is a manual, button-driven
 		# action, so that window is rare enough in practice that a real fix
 		# (e.g. locking a stable anchor row instead of a query that may match
@@ -253,25 +246,41 @@ def create_ppe_assignments(doc, method=None):
 				"company": doc.company,
 				"farm": row.get("farm"),
 				"business_unit": row.get("business_unit"),
+				"cost_center": row.get("cost_center"),
 				"status": "Active",
 			}
 		).insert(ignore_permissions=True)
 
-		if is_ppe_issuance:
-			old_assignments = frappe.get_all(
+		# Close out whichever prior assignment this one supersedes: the most
+		# recent non-Active assignment for the same employee/item that isn't
+		# already pointing at a later replacement (so re-issuing the same item
+		# a third time links to the second assignment, not the first). Not
+		# scoped to the formal bulk-replacement-request flow (unlike the
+		# duplicate-active guard above, which only blocks a second *Active*
+		# assignment) -- any Stock Entry that issues this item to this
+		# employee again should surface the link, including a plain ad-hoc
+		# Material Issue with no Material Request involved at all. Its status
+		# moves to "Replaced" regardless of what it was before (Inactive,
+		# Expired, Returned) -- that prior status no longer matters once a
+		# real replacement has actually been issued.
+		old_name = frappe.db.get_value(
+			"Employee PPE Assignment",
+			{
+				"employee": employee,
+				"item_code": row.item_code,
+				"name": ["!=", new_assignment.name],
+				"status": ["!=", "Active"],
+				"replacement_assignment": ["in", ["", None]],
+			},
+			"name",
+			order_by="issue_date desc, creation desc",
+		)
+		if old_name:
+			frappe.db.set_value(
 				"Employee PPE Assignment",
-				filters={
-					"replacement_material_request": material_request,
-					"employee": employee,
-					"item_code": row.item_code,
-					"name": ["!=", new_assignment.name],
-				},
-				pluck="name",
+				old_name,
+				{"replacement_assignment": new_assignment.name, "status": "Replaced"},
 			)
-			for old_name in old_assignments:
-				frappe.db.set_value(
-					"Employee PPE Assignment", old_name, "replacement_assignment", new_assignment.name
-				)
 
 
 def inherit_accounting_dimensions_from_material_request(doc, method=None):
