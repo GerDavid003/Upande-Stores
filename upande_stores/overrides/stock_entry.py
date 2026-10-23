@@ -276,11 +276,14 @@ def create_ppe_assignments(doc, method=None):
 			order_by="issue_date desc, creation desc",
 		)
 		if old_name:
-			frappe.db.set_value(
-				"Employee PPE Assignment",
-				old_name,
-				{"replacement_assignment": new_assignment.name, "status": "Replaced"},
-			)
+			# .save(), not frappe.db.set_value: Employee PPE History is kept in
+			# sync by Employee PPE Assignment's own on_update hook, which a raw
+			# set_value bypasses entirely -- the History row would otherwise
+			# never see the status move to "Replaced".
+			old_assignment = frappe.get_doc("Employee PPE Assignment", old_name)
+			old_assignment.replacement_assignment = new_assignment.name
+			old_assignment.status = "Replaced"
+			old_assignment.save(ignore_permissions=True)
 
 
 def inherit_accounting_dimensions_from_material_request(doc, method=None):

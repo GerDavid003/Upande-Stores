@@ -42,7 +42,7 @@
   {"fieldname": "company", "fieldtype": "Link", "in_standard_filter": 1, "label": "Company", "options": "Company", "read_only": 1, "reqd": 1},
   {"fieldname": "farm", "fieldtype": "Link", "label": "Farm", "options": "Farm"},
   {"fieldname": "business_unit", "fieldtype": "Link", "label": "Business Unit", "options": "Business Unit"},
-  {"fieldname": "cost_center", "fieldtype": "Link", "label": "Cost Center", "options": "Cost Center"},
+  {"fieldname": "cost_center", "fieldtype": "Link", "label": "Cost Center", "options": "Cost Center", "link_filters": "[[\"Cost Center\",\"is_group\",\"=\",0]]"},
   {"fieldname": "column_break_xbtf", "fieldtype": "Column Break"},
   {"fieldname": "issue_date", "fieldtype": "Date", "label": "Issue Date", "read_only": 1, "reqd": 1},
   {"fieldname": "lifespan_months", "fieldtype": "Int", "label": "Lifespan (Months)", "read_only": 1},
