@@ -24,11 +24,19 @@ def validate_employee_required_for_material_issue(doc, method=None):
 
 def validate_employee_allocations(doc, method=None):
 	"""Material Request validate hook: no two item rows may share the same
-	(employee, item_code) pair when employee is set on both. Runs on every
-	save (not just once), so a duplicate can't be introduced after the fact
-	-- protects the Stock Entry lock/unlock logic
+	(employee, item_code, cost_center) triple when employee is set on both.
+	Runs on every save (not just once), so a duplicate can't be introduced
+	after the fact -- protects the Stock Entry lock/unlock logic
 	(lock_issued_employee/unlock_issued_employee), which would otherwise
 	have an ambiguous row to match against.
+
+	Same employee + same item_code with DIFFERENT cost_center is allowed --
+	e.g. the same person issuing the same item against two different cost
+	centers. This is only safe because Stock Entry's _find_allocation_row
+	prefers each row's own material_request_item link (set by the real
+	"Create" button, unambiguous) over re-deriving the match from
+	employee+item_code alone -- don't loosen this check further without
+	also checking that matching stays unambiguous.
 
 	Rows with a blank employee are unconstrained against each other --
 	ordinary bulk items (no per-employee attribution) can repeat item_code
@@ -38,11 +46,11 @@ def validate_employee_allocations(doc, method=None):
 	for row in doc.items:
 		if not row.employee:
 			continue
-		key = (row.employee, row.item_code)
+		key = (row.employee, row.item_code, row.cost_center)
 		if key in seen:
 			frappe.throw(
-				_("Employee {0} appears more than once for Item {1}.").format(
-					frappe.bold(row.employee), frappe.bold(row.item_code)
+				_("Employee {0} appears more than once for Item {1} under Cost Center {2}.").format(
+					frappe.bold(row.employee), frappe.bold(row.item_code), frappe.bold(row.cost_center or _("(none)"))
 				)
 			)
 		seen.add(key)

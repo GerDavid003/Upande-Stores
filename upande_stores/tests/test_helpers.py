@@ -21,6 +21,20 @@ def get_test_farm_and_business_unit():
 	return (farm[0] if farm else None, business_unit[0] if business_unit else None)
 
 
+def get_test_cost_centers(company="Karen Roses", count=2):
+	"""Return up to `count` non-group Cost Center names for `company`.
+
+	Like Farm/Business Unit/Employee, there's no bundled fixture guaranteeing
+	a specific second Cost Center exists -- callers needing two *distinct*
+	cost centers (to prove behavior actually varies by cost_center, not by
+	coincidence) should skip their test if fewer than the needed count come
+	back.
+	"""
+	return frappe.get_all(
+		"Cost Center", filters={"company": company, "is_group": 0}, limit=count, pluck="name"
+	)
+
+
 def get_test_employees(count=2):
 	"""Return up to `count` live Active Employee names.
 
@@ -83,7 +97,9 @@ def make_material_request(items=None, material_request_type="Material Issue"):
 	return mr
 
 
-def make_stock_entry_for_material_request(material_request, bio_employee=None, item_code=None, qty=1):
+def make_stock_entry_for_material_request(
+	material_request, bio_employee=None, item_code=None, qty=1, row_name=None
+):
 	"""Create a not-yet-submitted 'Material Issue' Stock Entry whose single
 	item references material_request's first item row -- the same shape the
 	real "Create" button on a submitted Material Request produces.
@@ -94,9 +110,16 @@ def make_stock_entry_for_material_request(material_request, bio_employee=None, i
 	build Material Requests with more than one item row and issue a specific
 	quantity against a specific one -- possibly more than once, to exercise
 	partial issuance.
+
+	row_name selects a specific row by name instead, for the case item_code
+	alone can't disambiguate -- two rows sharing the same employee and
+	item_code but different cost_center. Takes precedence over item_code
+	when both are given.
 	"""
 	mr_item = material_request.items[0]
-	if item_code:
+	if row_name:
+		mr_item = next(row for row in material_request.items if row.name == row_name)
+	elif item_code:
 		mr_item = next(row for row in material_request.items if row.item_code == item_code)
 	se = frappe.get_doc(
 		{

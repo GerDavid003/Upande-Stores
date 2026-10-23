@@ -3,6 +3,7 @@ from frappe.tests import IntegrationTestCase
 
 from upande_stores.overrides.stock_entry import inherit_accounting_dimensions_from_material_request
 from upande_stores.tests.test_helpers import (
+	get_test_cost_centers,
 	get_test_employees,
 	get_test_farm_and_business_unit,
 	make_material_request,
@@ -686,6 +687,48 @@ class IntegrationTestStockEntryPerItemAllocationLock(IntegrationTestCase):
 		self.assertEqual(locked_row.issued_via_stock_entry, se.name)
 		self.assertEqual(open_row.qty_issued, 0)
 		self.assertFalse(open_row.issued_via_stock_entry)
+
+	def test_same_employee_and_item_different_cost_centers_tracked_independently(self):
+		# validate_employee_allocations allows this combination specifically
+		# because _find_allocation_row resolves it via each row's own
+		# material_request_item link (set by make_stock_entry_for_material_request,
+		# matching the real "Create" button) instead of the ambiguous
+		# employee+item_code lookup alone.
+		cost_centers = get_test_cost_centers(count=2)
+		if len(cost_centers) < 2:
+			self.skipTest("Need at least 2 distinct Cost Centers on Karen Roses.")
+		cc1, cc2 = cost_centers
+		emp = self.employee
+		mr = make_material_request(
+			items=[
+				{"employee": emp, "item_code": "_Test Item", "qty": 5, "cost_center": cc1},
+				{"employee": emp, "item_code": "_Test Item", "qty": 3, "cost_center": cc2},
+			]
+		)
+		row1, row2 = mr.items[0], mr.items[1]
+
+		se1 = make_stock_entry_for_material_request(mr, bio_employee=emp, row_name=row1.name, qty=5)
+		se1.submit()
+
+		locked = frappe.db.get_value(
+			"Material Request Item", row1.name, ["qty_issued", "issued_via_stock_entry"], as_dict=True
+		)
+		open_row = frappe.db.get_value(
+			"Material Request Item", row2.name, ["qty_issued", "issued_via_stock_entry"], as_dict=True
+		)
+		self.assertEqual(locked.qty_issued, 5)
+		self.assertEqual(locked.issued_via_stock_entry, se1.name)
+		self.assertEqual(open_row.qty_issued, 0)
+		self.assertFalse(open_row.issued_via_stock_entry)
+
+		se2 = make_stock_entry_for_material_request(mr, bio_employee=emp, row_name=row2.name, qty=3)
+		se2.submit()
+
+		open_row = frappe.db.get_value(
+			"Material Request Item", row2.name, ["qty_issued", "issued_via_stock_entry"], as_dict=True
+		)
+		self.assertEqual(open_row.qty_issued, 3)
+		self.assertEqual(open_row.issued_via_stock_entry, se2.name)
 
 	def test_issuing_to_an_employee_without_a_matching_allocation_is_blocked(self):
 		emp1, emp2 = self.employees

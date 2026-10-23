@@ -2,6 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from upande_stores.tests.test_helpers import (
+	get_test_cost_centers,
 	get_test_employees,
 	get_test_farm_and_business_unit,
 	make_material_request,
@@ -54,15 +55,33 @@ class IntegrationTestMaterialRequestEmployeeAllocations(IntegrationTestCase):
 		)
 		self.assertEqual(len(mr.items), 2)
 
-	def test_rejects_duplicate_employee_and_item_pair(self):
+	def test_rejects_duplicate_employee_item_and_cost_center(self):
 		emp = self.employees[0]
+		cost_centers = get_test_cost_centers(count=1)
+		if not cost_centers:
+			self.skipTest("Need at least 1 Cost Center on Karen Roses.")
+		cost_center = cost_centers[0]
 		with self.assertRaises(frappe.ValidationError):
 			make_material_request(
 				items=[
-					{"employee": emp, "item_code": "_Test Item", "qty": 5},
-					{"employee": emp, "item_code": "_Test Item", "qty": 3},
+					{"employee": emp, "item_code": "_Test Item", "qty": 5, "cost_center": cost_center},
+					{"employee": emp, "item_code": "_Test Item", "qty": 3, "cost_center": cost_center},
 				]
 			)
+
+	def test_allows_same_employee_and_item_with_different_cost_centers(self):
+		emp = self.employees[0]
+		cost_centers = get_test_cost_centers(count=2)
+		if len(cost_centers) < 2:
+			self.skipTest("Need at least 2 distinct Cost Centers on Karen Roses.")
+		cc1, cc2 = cost_centers
+		mr = make_material_request(
+			items=[
+				{"employee": emp, "item_code": "_Test Item", "qty": 5, "cost_center": cc1},
+				{"employee": emp, "item_code": "_Test Item", "qty": 3, "cost_center": cc2},
+			]
+		)
+		self.assertEqual(len(mr.items), 2)
 
 	def test_allows_duplicate_item_when_employee_is_blank_on_both(self):
 		mr = make_material_request(

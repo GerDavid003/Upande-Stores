@@ -13,17 +13,42 @@ def _resolve_material_request(doc):
 	return None
 
 
-def _find_allocation_row(material_request, employee, item_code):
-	"""Match the Material Request Item row a Stock Entry item row fulfils:
-	first by (material_request, item_code, employee) -- the row allocated
-	to exactly this employee -- and if no such row exists, fall back to a
-	row with the same item_code and a blank employee (no per-employee
-	attribution at all; only reachable for non-Material-Issue request
-	types, since Material Issue requires employee on every row). Locks the
-	matched row for update so concurrent submits/cancels against the same
-	allocation serialize instead of racing on a stale read.
+def _find_allocation_row(material_request, employee, item_code, material_request_item=None):
+	"""Match the Material Request Item row a Stock Entry item row fulfils.
+
+	Preferred: the row's own material_request_item link, when set --
+	populated whenever the Stock Entry was created via Material Request's
+	"Create" button (the standard flow), and points at the exact allocation
+	row unambiguously. This is the only path that can tell apart two rows
+	sharing the same (employee, item_code) with different cost_center --
+	validate_employee_allocations allows that combination specifically
+	because this lookup resolves it correctly; employee+item_code alone
+	could not.
+
+	Falls back to (material_request, item_code, employee) -- the row
+	allocated to exactly this employee -- for Stock Entries not created
+	through that mapped flow (no material_request_item set on the row).
+	If no such row exists either, falls back further to a row with the
+	same item_code and a blank employee (no per-employee attribution at
+	all; only reachable for non-Material-Issue request types, since
+	Material Issue requires employee on every row).
+
+	Locks the matched row for update so concurrent submits/cancels against
+	the same allocation serialize instead of racing on a stale read.
 	"""
 	fields = ["name", "employee", "qty", "qty_issued", "issued_via_stock_entry"]
+
+	if material_request_item:
+		row = frappe.db.get_value(
+			"Material Request Item",
+			{"name": material_request_item, "parent": material_request, "parenttype": "Material Request"},
+			fields,
+			as_dict=True,
+			for_update=True,
+		)
+		if row:
+			return row
+
 	row = frappe.db.get_value(
 		"Material Request Item",
 		{
@@ -88,7 +113,9 @@ def lock_issued_employee(doc, method=None):
 		if not row.item_code:
 			continue
 
-		allocation = _find_allocation_row(material_request, doc.bio_employee, row.item_code)
+		allocation = _find_allocation_row(
+			material_request, doc.bio_employee, row.item_code, row.get("material_request_item")
+		)
 		if not allocation:
 			frappe.throw(
 				_("{0} is not allocated Item {1} under Material Request {2}.").format(
@@ -147,7 +174,9 @@ def unlock_issued_employee(doc, method=None):
 		if not row.item_code:
 			continue
 
-		allocation = _find_allocation_row(material_request, doc.bio_employee, row.item_code)
+		allocation = _find_allocation_row(
+			material_request, doc.bio_employee, row.item_code, row.get("material_request_item")
+		)
 		if not allocation:
 			continue
 
