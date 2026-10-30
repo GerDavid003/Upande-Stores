@@ -8,9 +8,12 @@ You can install this app using the [bench](https://github.com/frappe/bench) CLI:
 
 ```bash
 cd $PATH_TO_YOUR_BENCH
+bench get-app https://github.com/WilfredTinega/Upande-TA.git
 bench get-app $URL_OF_THIS_REPO --branch main
 bench install-app upande_stores
 ```
+
+Upande Stores depends on [Upande TA](https://github.com/WilfredTinega/Upande-TA) (for the `Biometric Logs` doctype), which must be on the bench before installing. `bench install-app upande_stores` installs it on the site automatically.
 
 ### Contributing
 

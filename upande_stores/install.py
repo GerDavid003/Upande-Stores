@@ -99,10 +99,10 @@ def get_custom_fields():
 				"no_copy": 1,
 			},
 			{
-				# Data, not Link: Biometric Logs lives in upande_ta, which may not be installed
 				"fieldname": "matched_biometric_log",
-				"fieldtype": "Data",
+				"fieldtype": "Link",
 				"label": "Matched Biometric Log",
+				"options": "Biometric Logs",
 				"insert_after": "biometric_verified_at",
 				"depends_on": "requires_biometric",
 				"read_only": 1,
