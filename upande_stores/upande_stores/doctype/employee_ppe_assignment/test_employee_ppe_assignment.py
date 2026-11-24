@@ -1,6 +1,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import today
 
+from upande_stores.api.ppe import mark_ppe_assignment_returned
 from upande_stores.tests.test_helpers import get_test_employees, make_ppe_item
 
 
@@ -245,3 +247,77 @@ class IntegrationTestEmployeePPEAssignment(IntegrationTestCase):
 			),
 			inspection,
 		)
+
+	def test_mark_as_returned_sets_status_and_date(self):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Active",
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.get_doc("Employee PPE Assignment", assignment.name)
+			.update({"status": "Active", "returned_date": None})
+			.save(ignore_permissions=True)
+		)
+
+		result_status = mark_ppe_assignment_returned(assignment.name)
+
+		self.assertEqual(result_status, "Returned")
+		self.assertEqual(
+			frappe.db.get_value("Employee PPE Assignment", assignment.name, "status"), "Returned"
+		)
+		self.assertEqual(
+			str(frappe.db.get_value("Employee PPE Assignment", assignment.name, "returned_date")),
+			str(today()),
+		)
+
+		if "upande_hr" in frappe.get_installed_apps():
+			history_status = frappe.db.get_value(
+				"Employee PPE History",
+				{"ppe_assignment": assignment.name, "parent": self.employee},
+				"status",
+			)
+			if history_status is not None:
+				self.assertEqual(history_status, "Returned")
+
+	def test_mark_as_returned_blocks_already_returned_or_replaced(self):
+		assignment = frappe.get_doc(
+			{
+				"doctype": "Employee PPE Assignment",
+				"employee": self.employee,
+				"item_code": make_ppe_item(),
+				"quantity": 1,
+				"company": "_Test Company",
+				"issue_date": "2026-01-01",
+				"lifespan_months": 6,
+				"status": "Replaced",
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.get_doc("Employee PPE Assignment", assignment.name)
+			.update({"status": "Replaced"})
+			.save(ignore_permissions=True)
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			mark_ppe_assignment_returned(assignment.name)
+
+		assignment.reload()
+		assignment.status = "Returned"
+		assignment.returned_date = today()
+		assignment.save(ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.get_doc("Employee PPE Assignment", assignment.name)
+			.update({"status": "Returned", "returned_date": today()})
+			.save(ignore_permissions=True)
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			mark_ppe_assignment_returned(assignment.name)

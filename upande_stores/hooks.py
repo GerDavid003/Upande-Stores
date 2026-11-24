@@ -171,6 +171,8 @@ doc_events = {
 scheduler_events = {
 	"daily": [
 		"upande_stores.tasks.mark_expired_ppe_assignments",
+		"upande_stores.tasks.send_ppe_inspection_reminders",
+		"upande_stores.tasks.refresh_ppe_inspection_overdue_flags",
 	],
 }
 

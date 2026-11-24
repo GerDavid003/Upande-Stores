@@ -1,6 +1,8 @@
 import frappe
 from frappe import _
 
+from upande_stores.tasks import compute_next_inspection_due
+
 
 def _resolve_material_request(doc):
 	"""The Material Request this Stock Entry was created against, if any --
@@ -242,6 +244,7 @@ def create_ppe_assignments(doc, method=None):
 				"quantity": row.qty,
 				"issue_date": doc.posting_date,
 				"lifespan_months": lifespan,
+				"next_inspection_due": compute_next_inspection_due(doc.company, None, doc.posting_date),
 				"stock_entry": doc.name,
 				"company": doc.company,
 				"farm": row.get("farm"),

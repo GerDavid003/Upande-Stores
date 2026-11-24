@@ -30,5 +30,28 @@ frappe.ui.form.on("Employee PPE Assignment", {
 				__("Create")
 			);
 		}
+
+		if (["Active", "Inactive"].includes(frm.doc.status)) {
+			frm.add_custom_button(__("Mark as Returned"), () => {
+				frappe.confirm(
+					__("Mark {0}'s {1} as Returned?", [frm.doc.employee_name || frm.doc.employee, frm.doc.item_name || frm.doc.item_code]),
+					() => {
+						frappe.call({
+							method: "upande_stores.api.ppe.mark_ppe_assignment_returned",
+							args: { assignment: frm.doc.name },
+							callback: (r) => {
+								if (r.message) {
+									frappe.show_alert({
+										message: __("{0} marked as Returned", [frm.doc.name]),
+										indicator: "green",
+									});
+									frm.reload_doc();
+								}
+							},
+						});
+					}
+				);
+			});
+		}
 	},
 });

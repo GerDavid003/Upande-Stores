@@ -270,6 +270,23 @@ def create_bulk_ppe_material_request(assignments):
 
 
 @frappe.whitelist()
+def mark_ppe_assignment_returned(assignment):
+	doc = frappe.get_doc("Employee PPE Assignment", assignment)
+	if not frappe.has_permission("Employee PPE Assignment", "write", doc=doc):
+		frappe.throw(
+			_("Not permitted to write to Employee PPE Assignment {0}.").format(doc.name),
+			frappe.PermissionError,
+		)
+	if doc.status in ("Returned", "Replaced"):
+		frappe.throw(_("{0} is already {1} and cannot be marked as Returned.").format(doc.name, doc.status))
+
+	doc.status = "Returned"
+	doc.returned_date = today()
+	doc.save(ignore_permissions=True)
+	return doc.status
+
+
+@frappe.whitelist()
 def create_bulk_ppe_purchase_request(assignments):
 	docs = _load_assignments(assignments)
 	first = _check_same_scope(docs)

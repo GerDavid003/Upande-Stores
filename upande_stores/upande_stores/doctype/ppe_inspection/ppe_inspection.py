@@ -2,6 +2,8 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from upande_stores.tasks import compute_next_inspection_due
+
 
 class PPEInspection(Document):
 	def validate(self):
@@ -58,6 +60,9 @@ class PPEInspection(Document):
 			assignment.last_inspection_date = self.inspection_date
 			assignment.last_inspection_status = row.current_status
 			assignment.last_inspection = self.name
+			assignment.next_inspection_due = compute_next_inspection_due(
+				assignment.company, assignment.last_inspection_date, assignment.issue_date
+			)
 
 			if row.current_status in ("Worn Out", "Lost"):
 				assignment.status = "Inactive"
